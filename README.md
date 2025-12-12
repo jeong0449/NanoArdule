@@ -61,9 +61,7 @@ The ADC Toolchain converts external MIDI drum patterns into **ADT v2.2/v2.2a** f
 |--------|-------------|
 | [`adc-midtool.py`](./tools/adc-midtool.py) | Unified MIDI manager (scan, rename to 8.3, Type1→0, INDEX.TXT, GM drum check, CSV/JSON) |
 | [`adc-mid2adt.py`](./tools/adc-mid2adt.py) | MIDI → ADT conversion |
-| [`adc-clean.py`](./tools/adc-clean.py) | Normalize ADT |
 | [`adc-index.py`](./tools/adc-index.py) | Generate INDEX.TXT |
-| [`adc-batchmid.py`](./tools/adc-batchmid.py) | Batch MIDI conversion |
 | [`adc-adt2adp.py`](./tools/adc-adt2adp.py) | ADT → ADP wrapper |
 
 ### Example Workflow
