@@ -1,4 +1,4 @@
-# Ardule Project — Nano-based Drum Patternology Ecosystem
+# Ardule Project — Arduino Nano-based Drum Patternology Ecosystem
 
 > **Note:** This repository is currently undergoing internal testing.  
 > Components will be released sequentially as they become stable.
@@ -7,8 +7,7 @@
 It integrates **Arduino-based real-time drum engines**, a Python-based pattern studio (APS), a curated pattern library,  
 and a family of **lightweight pattern formats (ADT, ADP, ADS, ARR)**.
 
-With the addition of the **ADC Toolchain (adc- prefix)**, Ardule now supports automated conversion of MIDI drum patterns  
-into ADT format, enabling seamless integration of external rhythm material into the ecosystem.
+With the addition of the **ADC Toolchain (adc- prefix)**, Ardule now supports automated conversion of MIDI drum patterns into ADT format, enabling seamless integration of external rhythm material into the ecosystem.
 
 ---
 
