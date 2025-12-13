@@ -72,6 +72,7 @@ The ADC Toolchain converts external MIDI drum patterns into **ADT v2.2/v2.2a** f
 | [`adc-midtool.py`](./tools/adc-midtool.py) | Unified MIDI manager (scan, rename to 8.3, Type1→0, INDEX.TXT, GM drum check, CSV/JSON) |
 | [`adc-mid2report.py`](./tools/adc-mid2report.py) | Integrated MIDI report tool with triplet-aware subdivision analysis and ADT conversion hints. |
 | [`adc-split-drum-2bar-save.py`](./tools/adc-split-drum-2bar-save.py) | CH10-only 2-bar MIDI slicer that saves <GEN>_Pnnn patterns, with optional grid PNG and A4 PDF export. |
+| [`adc-drum-sim-matrix.py`](./tools/adc-drum-sim-matrix.py) | Compute all-pairs similarity matrices (Hamming/Cosine) for 2-bar CH10 drum pattern MIDI files using a 12-slot × N-column binary grid. |
 | [`adc-mid2adt.py`](./tools/adc-mid2adt.py) | Convert 2-bar drum MIDI files to ADT v2.2a with auto grid detection and velocity symbols (. - X O). |
 | [`adc-adt2adp.py`](./tools/adc-adt2adp.py) | Convert ADT v2.2a drum patterns to ADP v2.2 binary cache (fast load), with canonical velocity symbols (. - X O). |
 | [`adc-mkindex.py`](./tools/adc-mkindex.py) | Scan ADP v2.2a pattern files and generate /SYSTEM/INDEX.TXT for Ardule/APS (genre, grid, length, CRC, size). |

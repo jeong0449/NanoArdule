@@ -119,17 +119,39 @@ Notes:
 ## 10. Complete Example
 
 ```text
-# ADT v2.2a
-# GRID=16 LENGTH=32 TS=4/4 BPM=120
-# KIT=GM_STD
+; ADT v2.2a
+NAME=BLU_P001
+TIME_SIG=4/4
+GRID=8T
+LENGTH=24
+SLOTS=12
+KIT=GM_STD
+ORIENTATION=SLOT
+SLOT0=KK@36,KICK
+SLOT1=SN@38,SNARE
+SLOT2=CH@42,HH_CL
+SLOT3=OH@46,HH_OP
+SLOT4=LT@45,TOM_L
+SLOT5=MT@47,TOM_M
+SLOT6=HT@50,TOM_H
+SLOT7=RD@51,RIDE
+SLOT8=CR@49,CRASH
+SLOT9=RM@37,RIM
+SLOT10=CL@39,CLAP
+SLOT11=PH@44,HH_PED
+x.x..xx.x.xxx.x..xx.x.xx
+...x.....x.....x.....x..
+xxxxxxxxxxxxxxxxxxxxxxxx
+........................
+........................
+........................
+........................
+........................
+........................
+........................
+........................
+........................
 
-SLOT KICK   36
-SLOT SNARE  38
-SLOT HH_C   42
-
-KICK  : o... .... o... .... o... .... o.-. ....
-SNARE : .... o... .... o... .... o... .... o...
-HH_C  : x.x. x.x. x.x. x.x. x.x. x.x. x.x. x.x.
 ```
 
 ---

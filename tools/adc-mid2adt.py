@@ -1,36 +1,40 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-adc-mid2adt.py (ADT v2.2a, auto triplet detection)
-- Convert a 2-bar drum MIDI file into ADT text format (Ardule)
-- Default assumptions: 4/4, 2 bars, GM 12-slot layout
-- GRID/LENGTH are auto-detected from drum timing (unless --no-auto-grid is used)
-    * GRID=16  -> LENGTH=32  (4/4 straight 16th grid)
-    * GRID=8T  -> LENGTH=24  (triplet feel; 8th-triplet grid)
-    * GRID=16T -> LENGTH=48  (triplet feel; 16th-triplet grid)
+adc-mid2adt.py — MIDI (drums) to ADT text converter (ADT v2.2a)
 
-Requirements:
-  pip install mido
+Overview
+- Convert a 2-bar drum MIDI pattern into an ADT text file.
+- Assumes 4/4, 2 bars, and the GM 12-slot drum mapping by default.
+- Grid/step resolution is automatically detected by analyzing note-on timing:
+  * GRID=16  -> LENGTH=32  (4/4 straight 16th grid)
+  * GRID=8T  -> LENGTH=24  (8th-note triplet feel / 12 steps per bar)
+  * GRID=16T -> LENGTH=48  (16th-note triplet grid)
+- If needed, you can override detection with --no-auto-grid and force --grid/--length.
+
+Requirement
+- pip install mido
 """
+
 
 import argparse, sys, os, pathlib
 from mido import MidiFile
 
-# --- v2.2a defaults ---
-ADT_VERSION_STR = "ADT v2.2"
-DEFAULT_GRID = "16"     # auto-grid 실패 시 fallback
-DEFAULT_LENGTH = 32     # auto-grid 실패 시 fallback
+# NOTE: (translated) --- v2.2   ---
+ADT_VERSION_STR = "ADT v2.2a"
+DEFAULT_GRID = "16"     # Fallback if auto-grid detection fails
+DEFAULT_LENGTH = 32     # Fallback if auto-grid detection fails
 DEFAULT_TIME_SIG = "4/4"
 DEFAULT_KIT = "GM_STD"
 DEFAULT_ORIENTATION = "STEP"
 DEFAULT_SLOTS = 12
-DEFAULT_PPQN_NOTE = 96  # (정보용: 내부 ADP용 권고치, 여기선 미사용)
+DEFAULT_PPQN_NOTE = 96  # (Informational: recommended internal value for ADP; not used here)
 
-# GRID → subdivisions per beat
+# GRID -> subdivisions per beat
 GRID_SUBDIV = {
-    "16": 4,   # 16분 = 4 subdivision per beat
-    "8T": 3,   # 8분 트리플렛
-    "16T": 6,  # 16분 트리플렛
+    "16": 4,   # 16 = 4 subdivision per beat
+    "8T": 3,   # 8th-note triplet
+    "16T": 6,  # 16th-note triplet
 }
 
 GRID_LENGTH = {
@@ -48,52 +52,47 @@ GM12 = [
 NOTE2SLOT = {n:i for i,(n,_,_) in enumerate(GM12)}
 
 def parse_args():
-    p = argparse.ArgumentParser(description="2-bar drum MIDI → ADT (v2.2a, auto triplet detection; velocity symbols . - X O)")
-    p.add_argument("input", nargs="?", help="Input MIDI file path (.mid). Can be omitted when using --in-dir.")
-    p.add_argument("--in-dir", type=str, default=None, help="Input folder (batch-convert .mid files inside).")
-    p.add_argument("--out-dir", type=str, default=None, help="Output folder (default: same as input).")
-    p.add_argument("--recursive", action="store_true", help="When using --in-dir, process subfolders recursively.")
-    # GRID/LENGTH: 기본은 auto detection, --no-auto-grid 사용 시에만 강제 적용
+    p = argparse.ArgumentParser(description="2-bar MIDI (drums) → ADT (v2.2, auto triplet detection)")
+    p.add_argument("input", nargs="?", help="Input MIDI file path (.mid). Optional when --in-dir is used")
+    p.add_argument("--in-dir", type=str, default=None, help="Input folder (batch convert *.mid inside)")
+    p.add_argument("--out-dir", type=str, default=None, help="Output folder (default: same as input)")
+    p.add_argument("--recursive", action="store_true", help="When using --in-dir, process subfolders recursively")
+    # GRID/LENGTH: Automatic detection is enabled by default, --no-auto-grid only when enabled force override
     p.add_argument("--grid", type=str, choices=["16","8T","16T"], default=DEFAULT_GRID,
-                   help="(With --no-auto-grid) Force grid: 16 / 8T / 16T.")
+                   help="Force grid type (16 / 8T / 16T); effective only with --no-auto-grid.")
     p.add_argument("--length", type=int, choices=[24,32,48], default=DEFAULT_LENGTH,
-                   help="(With --no-auto-grid) Force step length: 24 / 32 / 48.")
+                   help="Force pattern length in steps (24 / 32 / 48); effective only with --no-auto-grid.")
     p.add_argument("--no-auto-grid", action="store_true",
-                   help="Disable auto GRID/LENGTH detection and use --grid/--length as-is.")
+                   help="Disable automatic grid detection and use --grid/--length as specified.")
     p.add_argument("--time-sig", type=str, default=DEFAULT_TIME_SIG,
-                   help="Display time signature (e.g., 4/4, 3/4, 12/8).")
-    p.add_argument("--kit", type=str, default=DEFAULT_KIT, help="KIT hint (e.g., GM_STD).")
+                   help="Time signature to write into ADT metadata (e.g., 4/4).")
+    p.add_argument("--kit", type=str, default=DEFAULT_KIT, help="Kit identifier to write into ADT metadata (free-form string).")
     p.add_argument("--orientation", type=str, choices=["STEP","SLOT"], default=DEFAULT_ORIENTATION,
-                   help="ADT body orientation (STEP recommended).")
+                   help="Grid orientation in ADT text output: STEP or SLOT.")
     p.add_argument("--channel", type=int, default=10,
-                   help="Drum channel (1–16, default 10=GM drums). 0/negative not allowed.")
+                   help="Drum channel to extract (1–16; default: 10).")
     p.add_argument("--vel-thresholds", type=str, default="64,96,112",
-                   help="Velocity thresholds for accent levels (three values, e.g. '64,96,112').")
-    p.add_argument("--overwrite", action="store_true", help="Overwrite existing .ADT files.")
+                   help="Velocity thresholds for mapping hits to '-', 'X', 'O' (comma-separated, e.g., 64,96,112).")
+    p.add_argument("--overwrite", action="store_true", help="Overwrite existing output .ADT files (otherwise skip).")
     return p.parse_args()
 
 def acc_from_velocity(v, thresholds):
-    # thresholds: [t1, t2, t3] (e.g., [64, 96, 112]); v<=0 means rest
+# NOTE: (translated) thresholds: [t1,t2,t3] (: [64,96,112]); v<=0 rest
     if v <= 0: return 0
     if v < thresholds[0]: return 1
     if v < thresholds[1]: return 2
-    # t3 is an upper hint; the max accent level is 3
+# NOTE: (translated) t3  ,  3
     return 3
 
 def acc_to_char(a):
-    # Velocity symbols (low -> high), case-insensitive by convention:
-    #   0: '.' (rest)
-    #   1: '-' (soft)
-    #   2: 'X' (medium)
-    #   3: 'O' (strong/accent)
-    return ['.', '-', 'X', 'O'][a]
+    return ['.','-', 'x','o'][a]
 
 def quantize_step(abs_ticks, tpq, grid, length):
     """
-    abs_ticks: 현재 메시지의 절대 tick
+    abs_ticks:    tick
     tpq: ticks per quarter (MIDI header)
     grid: "16"/"8T"/"16T"
-    length: 총 스텝 수 (24/32/48)
+    length:  number of steps (24/32/48)
     """
     subdiv = GRID_SUBDIV[grid]
     ticks_per_step = tpq / subdiv
@@ -101,14 +100,14 @@ def quantize_step(abs_ticks, tpq, grid, length):
         step = 0
     else:
         step = int(round(abs_ticks / ticks_per_step))
-    # Clamp events outside the 2-bar pattern length
+# NOTE: (translated) 2( )
     if step < 0: step = 0
     if step > length - 1: step = length - 1
     return step
 
 def collect_drum_events(mid: MidiFile, drum_channel_one_based: int):
     """
-    Collect absolute tick positions of drum-channel note_on (vel>0) events for GRID detection.
+    ADT/GRID     note_on(vel>0)   tick  .
     """
     tpq = mid.ticks_per_beat
     ch_idx = drum_channel_one_based - 1  # 0~15
@@ -137,16 +136,16 @@ def collect_drum_events(mid: MidiFile, drum_channel_one_based: int):
 
 def detect_grid_and_length(mid: MidiFile, drum_channel_one_based: int):
     """
-    Analyze drum events to auto-detect GRID (16/8T/16T) and LENGTH (32/24/48).
-    - Method: for each GRID candidate, quantize event ticks to that grid and compute
-      the average relative error (err / ticks_per_step); choose the smallest.
-    - If events are insufficient or tpq<=0, fall back to DEFAULT_GRID/DEFAULT_LENGTH.
+        GRID(16/8T/16T) LENGTH(32/24/48)  .
+    - :  GRID   tick    step  quantize  
+       ( tick_per_step   )    .
+    - If events are insufficient or TPQ<=0, fall back to DEFAULT_GRID/DEFAULT_LENGTH.
     """
     tpq, times = collect_drum_events(mid, drum_channel_one_based)
     if tpq <= 0 or not times:
         return DEFAULT_GRID, DEFAULT_LENGTH
 
-    # Normalize ticks by subtracting the earliest event (relative timing matters).
+    # Align to the earliest event (relative timing matters more than absolute start).
     t0 = min(times)
     norm_times = [t - t0 for t in times]
 
@@ -162,7 +161,7 @@ def detect_grid_and_length(mid: MidiFile, drum_channel_one_based: int):
             step = round(t / ticks_per_step)
             ideal = step * ticks_per_step
             err = abs(t - ideal)
-            # relative error per step
+            # Relative error in step units.
             total_err += err / ticks_per_step
         score = total_err / len(norm_times)
         if (best_score is None) or (score < best_score):
@@ -179,8 +178,8 @@ def extract_grid_from_midi(mid: MidiFile, drum_channel_one_based: int, grid: str
                            thresholds):
     """
     mid: mido.MidiFile
-    drum_channel_one_based: 1~16 (GM 드럼은 10)
-    grid/length: 이미 auto-detect 또는 수동으로 결정된 값
+    drum_channel_one_based: 1–16 (GM drums use 10).
+    grid/length: already decided by auto-detect or manual override.
     """
     tpq = mid.ticks_per_beat
     ch_idx = drum_channel_one_based - 1  # 0~15
@@ -194,7 +193,7 @@ def extract_grid_from_midi(mid: MidiFile, drum_channel_one_based: int, grid: str
                 continue
             if msg.type not in ("note_on","note_off"):
                 continue
-            # Some DAWs may insert messages without a channel field
+            # Some DAWs may emit meta messages without a channel field.
             ch = getattr(msg, "channel", None)
             if ch is None or ch != ch_idx:
                 continue
@@ -202,7 +201,7 @@ def extract_grid_from_midi(mid: MidiFile, drum_channel_one_based: int, grid: str
             if note is None or note not in NOTE2SLOT:
                 continue
             vel = getattr(msg, "velocity", 0) if msg.type == "note_on" else 0
-            if vel <= 0:  # Ignore note_off or note_on vel=0 (gate handled by the engine)
+            if vel <= 0:  # Ignore note_off or vel=0 (note gating is handled by the engine).
                 continue
 
             step = quantize_step(abs_t, tpq, grid, length)
@@ -216,8 +215,8 @@ def extract_grid_from_midi(mid: MidiFile, drum_channel_one_based: int, grid: str
 def write_adt(path_out: pathlib.Path, name_base: str, grid: str, length: int,
               time_sig: str, kit: str, orientation: str, grid_data):
     """
-    grid_data: STEP-major (length x 12) accent-level grid
-    If ORIENTATION=SLOT, rotate the grid for SLOT-major output
+    grid_data: STEP-major (length × 12) accent-level grid.
+    If orientation is SLOT, rotate the grid by 90° for output.
     """
     lines = []
     lines.append(f"; {ADT_VERSION_STR}")
@@ -229,18 +228,18 @@ def write_adt(path_out: pathlib.Path, name_base: str, grid: str, length: int,
     lines.append(f"KIT={kit}")
     lines.append(f"ORIENTATION={orientation}")
 
-    # Slot declarations
+    # Slot header
     for idx,(note,abbr,name) in enumerate(GM12):
         lines.append(f"SLOT{idx}={abbr}@{note},{name}")
 
     # Body
     if orientation == "STEP":
-        # length줄 × 12문자
+        # length lines × 12 characters
         for s in range(length):
             row = ''.join(acc_to_char(grid_data[s][j]) for j in range(DEFAULT_SLOTS))
             lines.append(row)
     else:
-        # SLOT-우선(12줄 × length문자) — 90도 회전하여 출력
+        # SLOT-major (12 lines × length chars noting steps) — output as a 90° rotated view.
         for j in range(DEFAULT_SLOTS):
             row = ''.join(acc_to_char(grid_data[s][j]) for s in range(length))
             lines.append(row)
@@ -264,21 +263,21 @@ def convert_file(path_in: pathlib.Path, out_dir: pathlib.Path, args):
     except Exception as e:
         return False, f"mido load error: {path_in.name}: {e}"
 
-    # Validate drum channel
+    # Channel check
     ch = args.channel
     if not (1 <= ch <= 16):
         return False, f"--channel must be 1..16 (got {ch})"
 
-    # Velocity thresholds
+    # velocity thresholds
     try:
         th = [int(x.strip()) for x in args.vel_thresholds.split(",")]
         if len(th) != 3:
             raise ValueError
-        th.sort()  # 오름차순 보장
+        th.sort()  # Ensure ascending order
     except Exception:
         return False, f"--vel-thresholds must be like '64,96,112'"
 
-    # Auto-detect GRID/LENGTH or use manual settings
+    # Auto-detect GRID/LENGTH or use manual override
     if args.no_auto_grid:
         grid = args.grid
         length = args.length
@@ -305,10 +304,16 @@ def convert_file(path_in: pathlib.Path, out_dir: pathlib.Path, args):
 
 def iter_midi_files(root: pathlib.Path, recursive: bool):
     if not recursive:
-        for p in root.glob("*.mid"):
-            yield p
-        for p in root.glob("*.MID"):
-            yield p
+        # On Windows, glob patterns may match case-insensitively, so "*.mid" and "*.MID"
+        # can yield the same files twice. De-duplicate by resolved absolute path.
+        seen = set()
+        for pat in ("*.mid", "*.MID"):
+            for p in root.glob(pat):
+                rp = p.resolve()
+                if rp in seen:
+                    continue
+                seen.add(rp)
+                yield p
     else:
         for p in root.rglob("*"):
             if p.suffix.lower() in (".mid",".midi"):
@@ -331,7 +336,7 @@ def main():
         print(f"\nDone. {ok}/{total} converted.")
         sys.exit(0)
 
-    # 단일 파일 모드
+    # Single-file mode
     if not args.input:
         print("Usage: adc-mid2adt.py <file.mid> [--no-auto-grid --grid 16|8T|16T --length 24|32|48] ...", file=sys.stderr)
         sys.exit(1)
