@@ -13,20 +13,30 @@ With the addition of the **ADC Toolchain (adc- prefix)**, Ardule now supports au
 
 # 🌐 Ecosystem Overview
 
-## 1. Nano Ardule Player (Firmware)
+## 1. The Hardware: Nano Ardule
+
+> Content will be added in a future update.
+
+## 2. Nano Ardule Drum Pattern Player (Firmware)
+
+> **Firmware scope**  
+> This repository currently focuses on the **Drum Pattern Player firmware**, which implements the ADT/ADP-based
+> pattern playback engine and serves as the reference implementation of the Ardule pattern system.  
+>  
+> Another firmware variant (e.g. a **Type-0 MIDI file player** with program change, layering, splitting, and more; see the demo video on YouTube: https://www.youtube.com/watch?v=ZyeiwCxAJcU) exists internally and are not part of the public
+> release at this time, but **may be published in the future as the project evolves and matures**.
 A real-time drum pattern engine for **Arduino Nano / Nano Every**.
 
 - ADS streaming engine  
 - GM/GS/XG CH10 playback  
 - Program Change kit switching  
-- Layering / Splitting  
 - LCD user interface  
 - MicroSD pattern library  
 - MIDI routing  
 
 ---
 
-## 2. Ardule Pattern Studio — APS (PC Toolchain)
+## 3. Ardule Pattern Studio — APS (PC Toolchain)
 Python-based editor for pattern authoring:
 
 - ADT text editor  
@@ -39,7 +49,7 @@ Python-based editor for pattern authoring:
 
 ---
 
-## 3. Pattern Formats
+## 4. Pattern Formats
 
 | Format | Purpose | Details |
 |--------|---------|---------|
@@ -50,7 +60,7 @@ Python-based editor for pattern authoring:
 
 ---
 
-## 4. ADC Toolchain (adc- prefix) — MIDI → ADT Converters  
+## 5. ADC Toolchain (adc- prefix) — MIDI → ADT Converters  
 Located in: `tools/`
 
 The ADC Toolchain converts external MIDI drum patterns into **ADT v2.2/v2.2a** format.
@@ -60,9 +70,12 @@ The ADC Toolchain converts external MIDI drum patterns into **ADT v2.2/v2.2a** f
 | Script | Description |
 |--------|-------------|
 | [`adc-midtool.py`](./tools/adc-midtool.py) | Unified MIDI manager (scan, rename to 8.3, Type1→0, INDEX.TXT, GM drum check, CSV/JSON) |
-| [`adc-mid2adt.py`](./tools/adc-mid2adt.py) | MIDI → ADT conversion |
-| [`adc-index.py`](./tools/adc-index.py) | Generate INDEX.TXT |
-| [`adc-adt2adp.py`](./tools/adc-adt2adp.py) | ADT → ADP wrapper |
+| [`adc-mid2report.py`](./tools/adc-mid2report.py) | Integrated MIDI report tool with triplet-aware subdivision analysis and ADT conversion hints. |
+| [`adc-split-drum-2bar-save.py`](./tools/adc-split-drum-2bar-save.py) | CH10-only 2-bar MIDI slicer that saves <GEN>_Pnnn patterns, with optional grid PNG and A4 PDF export. |
+| [`adc-mid2adt.py`](./tools/adc-mid2adt.py) | Convert 2-bar drum MIDI files to ADT v2.2a with auto grid detection and velocity symbols (. - X O). |
+| [`adc-adt2adp.py`](./tools/adc-adt2adp.py) | Convert ADT v2.2a drum patterns to ADP v2.2 binary cache (fast load), with canonical velocity symbols (. - X O). |
+| [`adc-mkindex.py`](./tools/adc-mkindex.py) | Scan ADP v2.2a pattern files and generate /SYSTEM/INDEX.TXT for Ardule/APS (genre, grid, length, CRC, size). |
+
 
 ### Example Workflow
 
@@ -168,3 +181,18 @@ MIT License.
 # 📬 Contact
 
 Use GitHub Issues for questions and suggestions.
+---
+
+## 📚 Documentation
+
+Detailed documentation is organized by topic under the `docs/` directory.
+
+- [Project overview](./docs/overview.md)
+- [Architecture](./docs/architecture.md)
+- [Nano Ardule Drum Pattern Player firmware](./docs/firmware/drum-pattern-player.md)
+- [Ardule Pattern Studio (APS)](./docs/APS/overview.md)
+- [ADT v2.2a specification](./specs/ADT_v2.2a.md)
+- [ADP v2.2 specification](./specs/ADP_v2.2.md)
+- [ADC toolchain manuals](./docs/tools/README.md)
+
+> Some documents are placeholders and will be expanded in future updates.
