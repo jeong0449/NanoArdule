@@ -103,6 +103,44 @@ Includes (or supports) 2-bar patterns across genres:
 
 ---
 
+## Common Execution Environment (APS & ADC)
+
+The following execution environment is shared by **Ardule Pattern Studio (APS)** and the **ADC Toolchain**.  
+This configuration is recommended for reliable operation across pattern editing, conversion, analysis, and playback.
+
+### Python
+
+- **Python 3.11.6**  
+  Installed from **https://www.python.org**  
+  > Microsoft Store Python distributions are not recommended due to known issues with terminal handling
+  > (`curses`) and MIDI backends.
+
+### Required Python Libraries
+
+- `mido`
+- `python-rtmidi`
+- `windows-curses` (Windows only)
+
+These libraries are required by both APS and ADC tools for MIDI handling, terminal-based UI,
+and consistent runtime behavior.
+
+### External Tools
+
+- **Ghostscript**  
+  Required by ADC tools that generate **PDF outputs** (e.g. drum grid visualization and A4 pattern sheets).
+
+  Ghostscript must be available in the system `PATH`.
+
+### Platform
+
+- Windows 10 / Windows 11
+- Command Prompt, PowerShell, or Windows Terminal
+
+> APS and ADC tools can be used without MIDI hardware for editing, conversion, visualization, and analysis.  
+> MIDI output is only required when using real-time playback or preview features.
+
+---
+
 # 🏗 Repository Structure
 
 ```
