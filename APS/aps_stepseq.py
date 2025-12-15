@@ -78,6 +78,59 @@ DEFAULT_DRUM_LANES = [
 
 
 
+
+# ----------------------------------------------------------------------
+# Velocity/level mapping (ADT v2.2a)
+# ----------------------------------------------------------------------
+
+def level_to_vel(level: int) -> int:
+    """Map ADT level (0..3) to representative MIDI velocity."""
+    try:
+        l = int(level)
+    except Exception:
+        l = 0
+    if l <= 0:
+        return 0
+    if l == 1:
+        return 48
+    if l == 2:
+        return 88
+    return 120
+
+def vel_to_level(vel: int) -> int:
+    """Map MIDI velocity to ADT level (0..3)."""
+    try:
+        v = int(vel)
+    except Exception:
+        v = 0
+    if v <= 0:
+        return 0
+    if v < 60:
+        return 1
+    if v < 110:
+        return 2
+    return 3
+
+# ----------------------------------------------------------------------
+# StepSeq inline velocity adjust (vim-style, non-cycling)
+# - Keep existing j/k (lane move) intact; use Shift+J / Shift+K to adjust velocity.
+# - Clamp within levels 1..3 (no cycling, no rest) to avoid creating "on + vel=0" cells.
+# ----------------------------------------------------------------------
+
+def _clamp_level_1_3(level: int) -> int:
+    try:
+        l = int(level)
+    except Exception:
+        l = 2
+    if l < 1:
+        return 1
+    if l > 3:
+        return 3
+    return l
+
+def _adjust_level_1_3(level: int, delta: int) -> int:
+    return _clamp_level_1_3(_clamp_level_1_3(level) + int(delta))
+
 # ----------------------------------------------------------------------
 # Conversion helpers: (현재는 안 써도 되지만 남겨둠)
 # ----------------------------------------------------------------------
@@ -194,6 +247,7 @@ def stepseq_mode(
     meta: PatternMeta,
     drum_events: List[DrumEvent],
     play_callback: Optional[Callable[[StepGrid, PatternMeta], None]] = None,
+    drum_lanes=None,
 ) -> Tuple[bool, bool, List[DrumEvent]]:
     """
     Main entry point for APS.
@@ -208,7 +262,7 @@ def stepseq_mode(
     stdscr.refresh()
 
     # events -> grid (우리는 APS에서 grid로 변환해서 넘겨도 되지만, 여기서 다시 한번 만들어 씀)
-    grid, non_grid = _build_stepgrid_from_events(drum_events, meta)
+    grid, non_grid = _build_stepgrid_from_events(drum_events, meta, drum_lanes=drum_lanes)
 
     modified = False
     saved = False
@@ -219,6 +273,17 @@ def stepseq_mode(
     page = 0   # 0 = step 0–15, 1 = step 16–31
 
     max_y, max_x = stdscr.getmaxyx()
+
+    # Dirty-state tracking: show '*' only when current grid differs from baseline (saved/original)
+    def _grid_signature(g: StepGrid):
+        # Compare only on/off and velocity level (0..3). Ignore raw MIDI velocities for stability.
+        return tuple(
+            (cell.on, vel_to_level(cell.vel) if cell.on else 0)
+            for lane in g.lanes
+            for cell in lane.cells
+        )
+
+    baseline_sig = _grid_signature(grid)
 
     def clamp_cursor():
         nonlocal cur_lane, cur_step, page
@@ -235,10 +300,16 @@ def stepseq_mode(
     def draw():
         stdscr.erase()
 
+        # Draw frame
+        try:
+            stdscr.border()
+        except curses.error:
+            pass
+
         header = (
             "[STEP] {name}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  MOD={mod}"
             .format(
-                name=meta.name,
+                name=(meta.name + ('*' if modified else '')),
                 ch=meta.channel + 1,
                 bars=meta.bars,
                 steps=grid.steps,
@@ -247,17 +318,17 @@ def stepseq_mode(
             )
         )
         try:
-            stdscr.addnstr(0, 0, header.ljust(max_x), max_x)
+            stdscr.addnstr(1, 2, header.ljust(max_x - 4), max_x - 4)
         except curses.error:
             pass
 
         start_step = page * 16
         end_step = start_step + 16
-        y_step = 2
+        y_step = 3
         col0 = 8
 
         try:
-            stdscr.addnstr(y_step, 0, " " * max_x, max_x)
+            stdscr.addnstr(y_step, 1, " " * (max_x - 2), max_x - 2)
         except curses.error:
             pass
 
@@ -276,14 +347,25 @@ def stepseq_mode(
             if y >= max_y - 2:
                 break
             try:
-                stdscr.addnstr(y, 0, lane.name.ljust(col0 - 1), col0 - 1)
+                stdscr.addnstr(y, 2, lane.name.ljust(col0 - 3), col0 - 3)
             except curses.error:
                 pass
 
             col = col0
             for s in range(start_step, end_step):
                 cell = lane.cells[s]
-                ch = "x" if cell.on else "."
+                if cell.on:
+                    lvl = vel_to_level(cell.vel)
+                    if lvl <= 0:
+                        ch = "."
+                    elif lvl == 1:
+                        ch = "-"
+                    elif lvl == 2:
+                        ch = "x"
+                    else:
+                        ch = "o"
+                else:
+                    ch = "."
                 attr = curses.A_REVERSE if (li == cur_lane and s == cur_step) else 0
                 try:
                     stdscr.addnstr(y, col, " " + ch, 2, attr)
@@ -291,9 +373,16 @@ def stepseq_mode(
                     pass
                 col += 3
 
-        footer = "Arrows:move  Enter:on/off  +/-:vel  [ ]:page  C:1→2bar  Space:play  W:save  Q/Esc:exit"
+        # Velocity legend
+        legend = "Legend: . rest  - soft  x medium  o strong"
         try:
-            stdscr.addnstr(max_y - 1, 0, footer.ljust(max_x), max_x)
+            stdscr.addnstr(max_y - 4, 2, legend.ljust(max_x - 4), max_x - 4)
+        except curses.error:
+            pass
+
+        footer = "Move: arrows/h/j/k/l  Enter:toggle  J/K:vel  [ ]:page  c:copy  Space:play  w:save  q/Esc:exit"
+        try:
+            stdscr.addnstr(max_y - 2, 1, footer.ljust(max_x - 2), max_x - 2)
         except curses.error:
             pass
 
@@ -348,24 +437,48 @@ def stepseq_mode(
             else:
                 cell.on = True
                 if cell.vel <= 0:
-                    cell.vel = 100
+                    cell.vel = 88
             modified = True
-
-        elif key == ord("+"):
-            cell = grid.lanes[cur_lane].cells[cur_step]
-            if not cell.on:
-                cell.on = True
-                if cell.vel <= 0:
-                    cell.vel = 100
-            cell.vel = min(127, cell.vel + 8)
-            modified = True
-
-        elif key == ord("-"):
+        elif key == ord('K'):  # Shift+K: stronger (vim-style, non-cycling)
             cell = grid.lanes[cur_lane].cells[cur_step]
             if cell.on:
-                cell.vel = max(1, cell.vel - 8)
+                lvl = vel_to_level(cell.vel)
+                if lvl < 1:
+                    lvl = 2
+                lvl = _adjust_level_1_3(lvl, +1)
+                cell.vel = level_to_vel(lvl)
                 modified = True
 
+        elif key == ord('J'):  # Shift+J: weaker (vim-style, non-cycling)
+            cell = grid.lanes[cur_lane].cells[cur_step]
+            if cell.on:
+                lvl = vel_to_level(cell.vel)
+                if lvl < 1:
+                    lvl = 2
+                lvl = _adjust_level_1_3(lvl, -1)
+                cell.vel = level_to_vel(lvl)
+                modified = True
+        elif key in (curses.KEY_PPAGE, 339):  # PgUp: stronger
+            cell = grid.lanes[cur_lane].cells[cur_step]
+            if cell.on:
+                lvl = vel_to_level(cell.vel)
+                if lvl < 1:
+                    lvl = 2
+                elif lvl < 3:
+                    lvl += 1
+                cell.vel = level_to_vel(lvl)
+                modified = True
+
+        elif key in (curses.KEY_NPAGE, 338):  # PgDn: weaker (but not rest)
+            cell = grid.lanes[cur_lane].cells[cur_step]
+            if cell.on:
+                lvl = vel_to_level(cell.vel)
+                if lvl > 1:
+                    lvl -= 1
+                else:
+                    lvl = 1
+                cell.vel = level_to_vel(lvl)
+                modified = True
         elif key in (ord("c"), ord("C")):
             for lane in grid.lanes:
                 for i in range(16):
@@ -395,6 +508,8 @@ def stepseq_mode(
 
         elif key in (ord("w"), ord("W")):
             saved = True
+            baseline_sig = _grid_signature(grid)
+            modified = False
             break
 
         elif key in (ord("q"), ord("Q"), 27):  # q / Q / ESC
@@ -405,7 +520,8 @@ def stepseq_mode(
             break
 
         clamp_cursor()
+        modified = (_grid_signature(grid) != baseline_sig)
         draw()
 
-    new_events = _apply_stepgrid_to_events(grid, meta, non_grid)
+    new_events =_apply_stepgrid_to_events(grid, meta, non_grid)
     return modified, saved, new_events

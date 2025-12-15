@@ -352,8 +352,11 @@ def draw_menu(stdscr):
 
 
 def show_pattern_info_curses(stdscr, p: Pattern):
-    """
-    패턴 정보 + 슬롯 약자/이름/노트 번호 + 그리드 색상 legend(영문 설명) 표시.
+    """Show pattern info in a centered popup window.
+
+    Notes:
+      - Handles terminal resize (KEY_RESIZE) by rebuilding the popup.
+      - Exits on any non-resize key.
     """
     lines = [
         f"Name : {p.name}",
@@ -367,44 +370,77 @@ def show_pattern_info_curses(stdscr, p: Pattern):
     ]
 
     for i in range(p.slots):
-        ab = p.slot_abbr[i]
-        nm = p.slot_name[i]
-        nt = p.slot_note[i]
-        lines.append(f"  {i:02d}: {ab}  ->  {nm} (note {nt})")
+        abbr = p.slot_abbr[i] if i < len(p.slot_abbr) else "??"
+        name = p.slot_name[i] if i < len(p.slot_name) else "UNKNOWN"
+        note = p.slot_note[i] if i < len(p.slot_note) else -1
+        lines.append(f"  {i:02d}. {abbr:>2} -> {name} / {note}")
 
-    # 그리드 색상/악센트 설명 (영문)
     lines.extend(
         [
             "",
-            "Grid color legend:",
+            "Legend:",
+            "  · '.'       : rest",
+            "  · '-'       : soft (acc1)",
+            "  · 'x'       : medium (acc2)",
+            "  · 'o'       : strong (acc3)",
+            "",
+            "Preview colors (if enabled):",
             "  · (white)  : no hit on even beats",
             "  · (cyan)   : no hit on odd beats",
             "  x (green)  : soft accent (acc1)",
             "  x (yellow) : medium accent (acc2)",
             "  x (red)    : strong accent (acc3)",
             "  x (blue)   : current playing step",
+            "",
+            "Press any key to close (resize is supported).",
         ]
     )
 
-    lines.append("")
-    lines.append("Press any key...")
+    def draw_popup():
+        max_y, max_x = stdscr.getmaxyx()
+        # popup size
+        h = min(len(lines) + 2, max(6, max_y - 2))
+        w = min(max(len(s) for s in lines) + 4, max(20, max_x - 2))
+        y = max(0, (max_y - h) // 2)
+        x = max(0, (max_x - w) // 2)
 
-    max_y, max_x = stdscr.getmaxyx()
-    h = min(len(lines) + 2, max_y - 2)
-    w = min(max(len(s) for s in lines) + 4, max_x - 2)
-    y = (max_y - h) // 2
-    x = (max_x - w) // 2
-    win = curses.newwin(h, w, y, x)
-    win.box()
-    visible_lines = lines[: h - 2]
-    for i, s in enumerate(visible_lines):
-        try:
-            win.addstr(1 + i, 2, s[: w - 4])
-        except curses.error:
-            pass
-    win.refresh()
-    win.getch()
+        win = curses.newwin(h, w, y, x)
+        win.keypad(True)
+        win.erase()
+        win.box()
 
+        visible = lines[: max(1, h - 2)]
+        for i, s in enumerate(visible):
+            try:
+                win.addstr(1 + i, 2, s[: max(1, w - 4)])
+            except curses.error:
+                pass
+
+        win.refresh()
+        return win
+
+    win = draw_popup()
+    while True:
+        ch = win.getch()
+        if ch == curses.KEY_RESIZE:
+            # Recompute terminal dimensions and rebuild popup
+            try:
+                curses.update_lines_cols()
+            except Exception:
+                pass
+            try:
+                curses.resizeterm(*stdscr.getmaxyx())
+            except Exception:
+                pass
+            stdscr.erase()
+            stdscr.refresh()
+            win = draw_popup()
+            continue
+        break
+
+    # Clear popup remnants and let caller redraw
+    stdscr.touchwin()
+    stdscr.refresh()
 
 def prompt_text(stdscr, prompt: str, maxlen: int = 40) -> Optional[str]:
     """

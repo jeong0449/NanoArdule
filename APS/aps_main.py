@@ -1,3 +1,56 @@
+
+def write_adt_file_v22a(path: str, pat):
+    """
+    Write ADT v2.2a in APS canonical KEY=VALUE header + SLOTn=ABBR@NOTE,NAME format
+    and grid with symbols ".-xo" (0..3).
+    """
+    lines = []
+    # Header
+    lines.append("; ADT v2.2a")
+    # Preserve NAME if available
+    name = getattr(pat, "name", None) or os.path.splitext(os.path.basename(path))[0]
+    lines.append(f"NAME={name}")
+    if getattr(pat, "time_sig", None):
+        lines.append(f"TIME_SIG={pat.time_sig}")
+    lines.append(f"GRID={getattr(pat, 'grid_type', '16')}")
+    lines.append(f"LENGTH={getattr(pat, 'length', 32)}")
+    lines.append(f"SLOTS={getattr(pat, 'slots', 12)}")
+    if getattr(pat, "kit", None):
+        lines.append(f"KIT={pat.kit}")
+    if getattr(pat, "orientation", None):
+        lines.append(f"ORIENTATION={pat.orientation}")
+
+    # Slots
+    slots = int(getattr(pat, "slots", 0) or 0)
+    for i in range(slots):
+        abbr = pat.slot_abbr[i] if hasattr(pat, "slot_abbr") and i < len(pat.slot_abbr) else f"S{i}"
+        note = pat.slot_note[i] if hasattr(pat, "slot_note") and i < len(pat.slot_note) else 0
+        nm = pat.slot_name[i] if hasattr(pat, "slot_name") and i < len(pat.slot_name) else ""
+        lines.append(f"SLOT{i}={abbr}@{note},{nm}")
+
+    lines.append("")  # blank line before grid
+
+    # Grid (steps x slots)
+    sym = ".-xo"
+    for step in getattr(pat, "grid", []):
+        row = "".join(sym[max(0, min(3, int(v)))] for v in step[:slots])
+        lines.append(row)
+
+    text = "\n".join(lines) + "\n"
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+def validate_grid_levels_v22a(pat):
+    """Guard: ensure pat.grid uses only 0..3."""
+    for si, row in enumerate(getattr(pat, "grid", [])):
+        for li, v in enumerate(row):
+            try:
+                iv = int(v)
+            except Exception:
+                raise ValueError(f"grid[{si}][{li}] is not int: {v!r}")
+            if iv < 0 or iv > 3:
+                raise ValueError(f"grid[{si}][{li}] out of range 0..3: {iv}")
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -487,18 +540,33 @@ def main_curses(stdscr):
             msg = f"StepSeq: length=32(2bar) 패턴만 지원 (현재 {pat.length})"
             return
 
-        # 4) GM Drum lanes (8레인만 사용)
-        lane_notes = [36, 38, 42, 46, 41, 45, 48, 37]
+        # 4) Drum lanes for StepSeq (METHOD B: use the pattern's SLOT definitions)
+        #    - This avoids hard-coded 8-lane mapping and always reflects the ADT's slot list.
+        #    - Preserve slot order as defined in the ADT (you can reverse here if you want KICK at bottom).
+        drum_lanes = []
         note_to_slot = {}
-        for idx, note in enumerate(getattr(pat, "slot_note", [])):
-            if note in lane_notes and note not in note_to_slot:
-                note_to_slot[note] = idx
+        for i, note in enumerate(getattr(pat, "slot_note", [])):
+            try:
+                n = int(note)
+            except Exception:
+                continue
+            abbr = ""
+            if hasattr(pat, "slot_abbr") and i < len(pat.slot_abbr):
+                abbr = str(pat.slot_abbr[i])
+            if not abbr:
+                abbr = f"S{i}"
+            drum_lanes.append((abbr, n))
+            # Use first occurrence for note->slot mapping (avoid duplicates)
+            if n not in note_to_slot:
+                note_to_slot[n] = i
 
-        if not note_to_slot:
-            msg = "StepSeq 대상 GM 드럼 노트 없음 (36/38/42/46/41/45/48/37)"
+        # Reverse lane order for seqedit display
+        drum_lanes = list(reversed(drum_lanes))
+        if not drum_lanes or not note_to_slot:
+            msg = "StepSeq: no SLOT notes found in this ADT"
             return
 
-        # 5) StepSeq timing meta
+# 5) StepSeq timing meta
         loop_len_ticks = 480 * 4 * 2  # 2 bar @ 480 PPQ
         steps = 32
         step_ticks = loop_len_ticks // steps
@@ -512,24 +580,32 @@ def main_curses(stdscr):
             bars=2,
         )
 
-        # 6) pat.grid -> DrumEvent 리스트로 변환
+        # 6) pat.grid -> DrumEvent list
+        #    IMPORTANT: preserve the original accent level from ADT v2.2a:
+        #      level 0..3  -> representative velocity via aps_stepseq.level_to_vel()
         drum_events = []
         for step in range(steps):
             tick = meta.loop_start_tick + step * step_ticks
             row = pat.grid[step]
             for note, slot_idx in note_to_slot.items():
-                if 0 <= slot_idx < len(row) and row[slot_idx]:
-                    drum_events.append(
-                        aps_stepseq.DrumEvent(
-                            tick=tick,
-                            chan=meta.channel,
-                            note=note,
-                            vel=100,
-                            type="on",
+                if 0 <= slot_idx < len(row):
+                    level = row[slot_idx]
+                    try:
+                        lvl_i = int(level)
+                    except Exception:
+                        lvl_i = 0
+                    if lvl_i > 0:
+                        drum_events.append(
+                            aps_stepseq.DrumEvent(
+                                tick=tick,
+                                chan=meta.channel,
+                                note=note,
+                                vel=aps_stepseq.level_to_vel(lvl_i),
+                                type="on",
+                            )
                         )
-                    )
 
-        # 7) P 키에서 호출될 재생 콜백 정의
+# 7) P 키에서 호출될 재생 콜백 정의
         def play_stepseq(grid, meta_inner):
             """
             StepSeq 내부에서 Space 키를 눌렀을 때 호출되는 콜백.
@@ -624,13 +700,12 @@ def main_curses(stdscr):
             meta,
             drum_events,
             play_callback=play_stepseq,
+            drum_lanes=drum_lanes,
         )
-
-        # 9) 변경 사항 없으면 그대로 종료
-        if not modified:
+        # 9) 변경 사항도 없고 저장도 안 하면 그대로 종료
+        if (not modified) and (not saved):
             msg = "StepSeq: 변경 없음"
             return
-
         # 10) pat.grid에서 드럼 슬롯들만 모두 0으로 초기화
         for step in range(steps):
             row = pat.grid[step]
@@ -653,11 +728,21 @@ def main_curses(stdscr):
             if 0 <= step_idx < steps:
                 row = pat.grid[step_idx]
                 if 0 <= slot_idx < len(row):
-                    row[slot_idx] = 1
+                    row[slot_idx] = aps_stepseq.vel_to_level(getattr(de, 'vel', 0))
 
         # 12) 수정된 패턴을 프리뷰로 사용
         loaded_pattern = pat
-        msg = "StepSeq: 패턴 수정 (메모리 반영). ADT 저장은 별도입니다."
+        loaded_pattern = pat
+        if saved:
+            try:
+                validate_grid_levels_v22a(pat)
+                write_adt_file_v22a(path, pat)
+                pattern_files = scan_patterns(root)
+                msg = f"StepSeq: saved {fname}"
+            except Exception as e:
+                msg = f"StepSeq save failed: {e}"
+        else:
+            msg = "StepSeq: modified (not saved)"
 
 
 
@@ -665,6 +750,13 @@ def main_curses(stdscr):
     while True:
         stdscr.clear()
         draw_menu(stdscr)
+        # Menu bar override (F4 Info, F5 DupPat)
+        try:
+            max_y0, max_x0 = stdscr.getmaxyx()
+            menu = "F1 Help  F2 Pat/ARR  F3 Refresh  F4 Info  F5 DupPat  F6 MIDI  F7 SaveARR  F8 CountIn  F9 BPM  q/F10 Quit"
+            stdscr.addnstr(0, 0, menu.ljust(max_x0 - 1), max_x0 - 1)
+        except curses.error:
+            pass
         # 안전 가드: midi_port가 아직 로컬에 없으면 기본값을 자동 선택
         if 'midi_port' not in locals():
             midi_port = find_gs()
@@ -858,6 +950,12 @@ def main_curses(stdscr):
             get_countin_label(),
         )
 
+        # Chain window title override
+        try:
+            chain_win.addnstr(0, 2, "ARR (Pattern Chain)", right_w - 4)
+        except curses.error:
+            pass
+
         stdscr.refresh()
 
         ch = stdscr.getch()
@@ -879,14 +977,87 @@ def main_curses(stdscr):
             if top_index < 0:
                 top_index = 0
 
-        # Quit (ESC is no longer used for quitting; only q / F10)
+        # --- 헬퍼: 여러 줄 텍스트를 중앙 팝업(반전)으로 보여주기 ---
+        def show_text_popup(lines_to_show: List[str], title: str = "Info"):
+            nonlocal stdscr
+            max_y, max_x = stdscr.getmaxyx()
+            # 여백 포함한 폭/높이 계산
+            content = [ln.rstrip("\n") for ln in lines_to_show]
+            if not content:
+                content = ["(empty)"]
+            w = min(max_x - 4, max(20, min(max(len(ln) for ln in content) + 4, max_x - 4)))
+            h = min(max_y - 4, max(6, min(len(content) + 4, max_y - 4)))
+            y0 = (max_y - h) // 2
+            x0 = (max_x - w) // 2
+            try:
+                win = curses.newwin(h, w, y0, x0)
+                win.bkgd(" ", curses.A_REVERSE)
+                win.erase()
+                win.border()
+                if title:
+                    t = f" {title} "
+                    if len(t) < w - 2:
+                        win.addnstr(0, max(1, (w - len(t)) // 2), t, w - 2, curses.A_REVERSE)
+                # 표시 가능한 줄 수
+                cap = h - 4
+                for i, ln in enumerate(content[:cap]):
+                    win.addnstr(2 + i, 2, ln.ljust(w - 4), w - 4, curses.A_REVERSE)
+                hint = "Press any key"
+                if len(hint) < w - 4:
+                    win.addnstr(h - 2, w - len(hint) - 2, hint, len(hint), curses.A_REVERSE)
+                win.refresh()
+                win.getch()
+            except curses.error:
+                # fallback: 상태 메시지로
+                show_message(stdscr, f"{title}: " + (content[0] if content else ""), 2.0)
+
+        # --- F5: 선택 패턴을 9xx 번호로 즉시 복제 ---
+        def duplicate_selected_pattern():
+            nonlocal pattern_files, selected_idx, list_mode, msg
+            if list_mode != "patterns" or not pattern_files:
+                return
+            src_name = pattern_files[selected_idx]
+            base, ext = os.path.splitext(src_name)
+            if len(base) < 3:
+                msg = "DupPat failed: bad pattern name"
+                return
+            genre = base[:3]
+            # 900부터 빈 슬롯 탐색
+            for n in range(900, 1000):
+                dst_base = f"{genre}_{n:03d}"
+                dst_name = dst_base + ext
+                dst_path = os.path.join(root, dst_name)
+                if not os.path.exists(dst_path):
+                    # 파일 복사(바이너리)
+                    try:
+                        with open(os.path.join(root, src_name), "rb") as fsrc:
+                            data = fsrc.read()
+                        with open(dst_path, "wb") as fdst:
+                            fdst.write(data)
+                        # 리스트 갱신 및 새 파일 선택
+                        pattern_files = scan_patterns(root)
+                        if dst_name in pattern_files:
+                            selected_idx = pattern_files.index(dst_name)
+                        msg = f"DupPat: {src_name} -> {dst_name}"
+                    except Exception as e:
+                        msg = f"DupPat failed: {e}"
+                    return
+            msg = "DupPat failed: no free slot 900-999"
+
+
+        # Quit (q / F10) - no Enter required
         if ch in (ord("q"), curses.KEY_F10):
-            confirm = prompt_text(stdscr, "Quit APS? (y/N): ")
-            if confirm is None:
-                msg = "Quit canceled."
-                continue
-            confirm = confirm.strip().lower()
-            if confirm == "y":
+            max_yq, max_xq = stdscr.getmaxyx()
+            msg_text = "Quit APS? (y/q = yes, other = no)"
+            yq = max_yq // 2
+            xq = max(0, (max_xq - len(msg_text)) // 2)
+            try:
+                stdscr.addnstr(yq, xq, msg_text, len(msg_text), curses.A_REVERSE)
+            except curses.error:
+                pass
+            stdscr.refresh()
+            kq = stdscr.getch()
+            if kq in (ord("y"), ord("Y"), ord("q"), ord("Q")):
                 break  # exit program
             else:
                 msg = "Quit canceled."
@@ -973,15 +1144,32 @@ def main_curses(stdscr):
                 msg = "Refreshed"
             continue
 
-        # F4: Section / Song 구조 개요
+
+        # F4: Info (선택 객체에 따라 PAT/ARR 정보 표시)
         if ch == curses.KEY_F4:
-            show_section_overview_curses(
-                stdscr, chain, section_mgr, chain_selected_idx
-            )
+            if list_mode == "patterns":
+                if loaded_pattern:
+                    show_pattern_info_curses(stdscr, loaded_pattern)
+                else:
+                    show_text_popup(["(no pattern loaded)"], title="Pattern Info")
+            else:  # list_mode == "arr"
+                if arr_files and 0 <= selected_idx < len(arr_files):
+                    arr_name = arr_files[selected_idx]
+                    try:
+                        with open(os.path.join(root, arr_name), "r", encoding="utf-8", errors="ignore") as f:
+                            lines_ = [ln.rstrip("\n") for ln in f]
+                        show_text_popup(lines_, title=f"ARR Info: {arr_name}")
+                    except Exception as e:
+                        show_text_popup([f"Failed to open {arr_name}", str(e)], title="ARR Info")
+                else:
+                    show_text_popup(["(no ARR selected)"], title="ARR Info")
             continue
 
-        # F5: Pattern Info
+        # F5: DupPat (선택 패턴을 9xx로 즉시 복제)
         if ch == curses.KEY_F5:
+            duplicate_selected_pattern()
+            continue
+
             if loaded_pattern:
                 show_pattern_info_curses(stdscr, loaded_pattern)
             continue

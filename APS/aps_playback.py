@@ -10,17 +10,14 @@ from aps_ui import draw_grid
 
 
 def velocity_from_acc(a: int) -> int:
-    """Map APS accent level (0..3) to MIDI velocity.
-
-    ADT v2.2a encodes relative dynamics only; APS uses a stable default mapping.
-    """
     if a <= 0:
         return 0
     if a == 1:
-        return 50
+        return 80
     if a == 2:
-        return 90
+        return 100
     return 120
+
 
 def play_pattern_on_output(
     p: Pattern,
@@ -39,6 +36,7 @@ def play_pattern_on_output(
 
     stdscr.nodelay(True)
     try:
+        t0 = time.monotonic()
         for step in range(p.length):
             try:
                 ch = stdscr.getch()
@@ -60,21 +58,37 @@ def play_pattern_on_output(
                     active.append(msg_on)
                     out.send(msg_on)
 
-            time.sleep(gate)
+            # Use monotonic-time scheduling to avoid drift and match target BPM
+            t_step_start = t0 + (step * step_sec)
+            t_gate_end = t_step_start + gate
+            t_step_end = t_step_start + step_sec
 
-            for msg_on in active:
-                out.send(mido.Message('note_off', note=msg_on.note, velocity=0, channel=msg_on.channel))
-
-            rest = step_sec - gate
-            t0 = time.time()
-            while time.time() - t0 < rest:
+            while True:
+                now = time.monotonic()
+                if now >= t_gate_end:
+                    break
                 try:
                     ch = stdscr.getch()
                     if ch == ord(' '):
                         raise KeyboardInterrupt
                 except Exception:
                     pass
-                time.sleep(0.002)
+                time.sleep(min(0.002, max(0.0, t_gate_end - now)))
+
+            for msg_on in active:
+                out.send(mido.Message('note_off', note=msg_on.note, velocity=0, channel=msg_on.channel))
+
+            while True:
+                now = time.monotonic()
+                if now >= t_step_end:
+                    break
+                try:
+                    ch = stdscr.getch()
+                    if ch == ord(' '):
+                        raise KeyboardInterrupt
+                except Exception:
+                    pass
+                time.sleep(min(0.002, max(0.0, t_step_end - now)))
     finally:
         stdscr.nodelay(False)
 

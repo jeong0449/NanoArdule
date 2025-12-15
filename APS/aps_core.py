@@ -11,10 +11,13 @@ import json
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+  
 try:
     from adc_adt2adp import parse_adt_text
-except ImportError:
+except Exception as e:
     parse_adt_text = None
+    raise RuntimeError(f"Failed to import adc_adt2adp.parse_adt_text: {e}")
+
 
 HIT_CHAR = "■"
 
@@ -54,7 +57,7 @@ class ChainEntry:
 
 def load_adt(path: str) -> Pattern:
     if parse_adt_text is None:
-        raise RuntimeError("adc-adt2adp.py(=adc_adt2adp module)가 필요합니다.")
+        raise RuntimeError("adt2adp.py 가 필요합니다.")
     raw = open(path, "r", encoding="utf-8", errors="ignore").read()
     meta, slot_decl, grid, _norm = parse_adt_text(raw)
 
