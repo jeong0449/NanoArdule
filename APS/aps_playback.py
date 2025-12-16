@@ -36,7 +36,6 @@ def play_pattern_on_output(
 
     stdscr.nodelay(True)
     try:
-        t0 = time.monotonic()
         for step in range(p.length):
             try:
                 ch = stdscr.getch()
@@ -58,37 +57,21 @@ def play_pattern_on_output(
                     active.append(msg_on)
                     out.send(msg_on)
 
-            # Use monotonic-time scheduling to avoid drift and match target BPM
-            t_step_start = t0 + (step * step_sec)
-            t_gate_end = t_step_start + gate
-            t_step_end = t_step_start + step_sec
-
-            while True:
-                now = time.monotonic()
-                if now >= t_gate_end:
-                    break
-                try:
-                    ch = stdscr.getch()
-                    if ch == ord(' '):
-                        raise KeyboardInterrupt
-                except Exception:
-                    pass
-                time.sleep(min(0.002, max(0.0, t_gate_end - now)))
+            time.sleep(gate)
 
             for msg_on in active:
                 out.send(mido.Message('note_off', note=msg_on.note, velocity=0, channel=msg_on.channel))
 
-            while True:
-                now = time.monotonic()
-                if now >= t_step_end:
-                    break
+            rest = step_sec - gate
+            t0 = time.time()
+            while time.time() - t0 < rest:
                 try:
                     ch = stdscr.getch()
                     if ch == ord(' '):
                         raise KeyboardInterrupt
                 except Exception:
                     pass
-                time.sleep(min(0.002, max(0.0, t_step_end - now)))
+                time.sleep(0.002)
     finally:
         stdscr.nodelay(False)
 
@@ -130,6 +113,7 @@ def play_chain(
     color_pairs,
     start_index: int,
     load_pattern_func,
+    out=None,
 ) -> int:
     if not chain:
         return start_index
@@ -138,9 +122,12 @@ def play_chain(
     if start_index >= len(chain):
         start_index = 0
 
-    out = mido.open_output(midi_port)
-    out.send(mido.Message('control_change', control=123, value=0, channel=9))
-    time.sleep(0.03)
+    opened_here = False
+    if out is None:
+        out = mido.open_output(midi_port)
+        out.send(mido.Message('control_change', control=123, value=0, channel=9))
+        time.sleep(0.03)
+        opened_here = True
 
     try:
         for i in range(start_index, len(chain)):
@@ -167,4 +154,5 @@ def play_chain(
 
         return len(chain) - 1 if chain else 0
     finally:
-        out.close()
+        if opened_here and out is not None:
+            out.close()
