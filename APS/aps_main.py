@@ -505,6 +505,78 @@ def main_curses(stdscr):
                 return None
 
 
+
+    def show_warning_popup(lines_to_show: List[str], title: str = "Warning"):
+        """
+        Show a modal warning popup in reverse video and wait for a key press.
+        This is used for non-fatal runtime warnings (e.g., missing patterns, MIDI open failure).
+        """
+        max_y, max_x = stdscr.getmaxyx()
+        content = [ln.rstrip("\n") for ln in (lines_to_show or [])]
+        if not content:
+            content = ["(no details)"]
+
+        w = min(max_x - 4, max(30, min(max(len(ln) for ln in content) + 6, max_x - 4)))
+        h = min(max_y - 4, max(7, min(len(content) + 4, max_y - 4)))
+        y0 = (max_y - h) // 2
+        x0 = (max_x - w) // 2
+
+        try:
+            win = curses.newwin(h, w, y0, x0)
+            win.keypad(True)
+            win.bkgd(" ", curses.A_REVERSE)
+            win.erase()
+            win.border()
+
+            if title:
+                t = f" {title} "
+                if len(t) < w - 2:
+                    win.addnstr(0, max(1, (w - len(t)) // 2), t, w - 2, curses.A_REVERSE)
+
+            cap = h - 4
+            for i, ln in enumerate(content[:cap]):
+                win.addnstr(2 + i, 2, ln.ljust(w - 4), w - 4, curses.A_REVERSE)
+
+            hint = "Press any key to dismiss"
+            if len(hint) < w - 4:
+                win.addnstr(h - 2, w - len(hint) - 2, hint, len(hint), curses.A_REVERSE)
+
+            win.refresh()
+            try:
+                curses.flushinp()  # drop any queued key repeats (e.g., held SPACE)
+            except Exception:
+                pass
+            while True:
+                k = win.getch()
+                # Ignore SPACE so a held trigger key does not instantly dismiss the popup
+                if k in (ord(' '), curses.KEY_RESIZE):
+                    continue
+                if k != -1:
+                    break
+        except curses.error:
+            try:
+                show_message(stdscr, content[0], 2.0)
+            except Exception:
+                pass
+
+
+    def try_open_midi_output(port_name: Optional[str]) -> Optional[str]:
+        """Return None on success, otherwise return an error string."""
+        if mido is None:
+            return "mido backend is not available."
+        if not port_name:
+            return "No MIDI output port selected."
+        try:
+            outp = mido.open_output(port_name)
+            try:
+                outp.close()
+            except Exception:
+                pass
+            return None
+        except Exception as e:
+            return str(e)
+
+
     def open_stepseq_for_selected_pattern():
         """
         현재 패턴 리스트에서 선택된 .ADT 패턴(2 bar, 32 step)을
@@ -613,6 +685,18 @@ def main_curses(stdscr):
             재생 중에는 현재 재생 중인 bar 번호(1 또는 2)를 화면 아래에 표시한다.
             """
             if mido is None or not midi_port:
+                return
+
+            err = try_open_midi_output(midi_port)
+            if err:
+                show_warning_popup(
+                    [
+                        "MIDI output port could not be opened.",
+                        f"Port: {midi_port}",
+                        err,
+                    ],
+                    title="Warning",
+                )
                 return
 
             try:
@@ -1002,7 +1086,7 @@ def main_curses(stdscr):
                 cap = h - 4
                 for i, ln in enumerate(content[:cap]):
                     win.addnstr(2 + i, 2, ln.ljust(w - 4), w - 4, curses.A_REVERSE)
-                hint = "Press any key"
+                hint = "Press any key to dismiss"
                 if len(hint) < w - 4:
                     win.addnstr(h - 2, w - len(hint) - 2, hint, len(hint), curses.A_REVERSE)
                 win.refresh()
@@ -1022,9 +1106,9 @@ def main_curses(stdscr):
                 msg = "DupPat failed: bad pattern name"
                 return
             genre = base[:3]
-            # 900부터 빈 슬롯 탐색
-            for n in range(900, 1000):
-                dst_base = f"{genre}_{n:03d}"
+            # 901부터 빈 슬롯 탐색
+            for n in range(901, 999):
+                dst_base = f"{genre}_P{n:03d}"
                 dst_name = dst_base + ext
                 dst_path = os.path.join(root, dst_name)
                 if not os.path.exists(dst_path):
@@ -1042,7 +1126,7 @@ def main_curses(stdscr):
                     except Exception as e:
                         msg = f"DupPat failed: {e}"
                     return
-            msg = "DupPat failed: no free slot 900-999"
+            msg = "DupPat failed: no free slot 901-999"
 
 
         # Quit (q / F10) - no Enter required
@@ -1655,6 +1739,19 @@ def main_curses(stdscr):
         if ch == ord(" "):
             if focus == "patterns":
                 if loaded_pattern and midi_port:
+                    err = try_open_midi_output(midi_port)
+                    if err:
+                        show_warning_popup(
+                            [
+                                "MIDI output port could not be opened.",
+                                f"Port: {midi_port}",
+                                err,
+                            ],
+                            title="Warning",
+                        )
+                        mode = "VIEW"
+                        continue
+
                     from aps_playback import play_pattern_in_grid
 
                     mode = "PLAY"
@@ -1677,11 +1774,28 @@ def main_curses(stdscr):
                         if not os.path.exists(p):
                             missing.append(e.filename)
                     if missing:
-                        msg = (
-                            f"Missing pattern(s): {missing[0]} "
-                            f"(total {len(missing)})"
+                        show_warning_popup(
+                            [
+                                "Missing component pattern file(s) for this ARR/chain.",
+                                f"First missing: {missing[0]}",
+                                f"Total missing: {len(missing)}",
+                            ],
+                            title="Warning",
                         )
-                        show_message(stdscr, msg)
+                        mode = "VIEW"
+                        continue
+
+
+                    err = try_open_midi_output(midi_port)
+                    if err:
+                        show_warning_popup(
+                            [
+                                "MIDI output port could not be opened.",
+                                f"Port: {midi_port}",
+                                err,
+                            ],
+                            title="Warning",
+                        )
                         mode = "VIEW"
                         continue
 
@@ -1725,8 +1839,15 @@ def main_curses(stdscr):
                                         )
                                     )
                                     time.sleep(quarter * off_frac)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            show_warning_popup(
+                                [
+                                    "MIDI output port could not be opened (count-in skipped).",
+                                    f"Port: {midi_port}",
+                                    str(e),
+                                ],
+                                title="Warning",
+                            )
 
                     def _load(path):
                         return (
