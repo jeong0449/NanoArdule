@@ -1803,8 +1803,6 @@ def main_curses(stdscr):
 
                     mode = "CHAIN"
 
-                    out_for_chain = None
-
                     if (
                         mido is not None
                         and countin_idx is not None
@@ -1812,17 +1810,6 @@ def main_curses(stdscr):
                         and 0 <= countin_idx < len(countin_presets)
                     ):
                         try:
-                            out_for_chain = mido.open_output(midi_port)
-                            out_for_chain.send(
-                                mido.Message(
-                                    "control_change",
-                                    control=123,
-                                    value=0,
-                                    channel=9,
-                                )
-                            )
-                            time.sleep(0.03)
-
                             quarter = 60.0 / float(bpm)
                             note = 42
                             vel = 100
@@ -1831,33 +1818,28 @@ def main_curses(stdscr):
                             on_frac = 0.15
                             off_frac = 0.85
 
-                            for _ in range(4):
-                                out_for_chain.send(
-                                    mido.Message(
-                                        "note_on",
-                                        note=note,
-                                        velocity=vel,
-                                        channel=chn,
+                            with mido.open_output(midi_port) as port:
+                                for _ in range(4):
+                                    port.send(
+                                        mido.Message(
+                                            "note_on",
+                                            note=note,
+                                            velocity=vel,
+                                            channel=chn,
+                                        )
                                     )
-                                )
-                                time.sleep(quarter * on_frac)
+                                    time.sleep(quarter * on_frac)
 
-                                out_for_chain.send(
-                                    mido.Message(
-                                        "note_off",
-                                        note=note,
-                                        velocity=0,
-                                        channel=chn,
+                                    port.send(
+                                        mido.Message(
+                                            "note_off",
+                                            note=note,
+                                            velocity=0,
+                                            channel=chn,
+                                        )
                                     )
-                                )
-                                time.sleep(quarter * off_frac)
+                                    time.sleep(quarter * off_frac)
                         except Exception as e:
-                            if out_for_chain is not None:
-                                try:
-                                    out_for_chain.close()
-                                except Exception:
-                                    pass
-                                out_for_chain = None
                             show_warning_popup(
                                 [
                                     "MIDI output port could not be opened (count-in skipped).",
@@ -1874,27 +1856,19 @@ def main_curses(stdscr):
                             else load_adp(path)
                         )
 
-                    try:
-                        chain_selected_idx = play_chain(
-                            chain,
-                            bpm,
-                            midi_port,
-                            stdscr,
-                            grid_win,
-                            chain_win,
-                            root,
-                            use_color,
-                            color_pairs,
-                            chain_selected_idx,
-                            _load,
-                            out=out_for_chain,
-                        )
-                    finally:
-                        if out_for_chain is not None:
-                            try:
-                                out_for_chain.close()
-                            except Exception:
-                                pass
+                    chain_selected_idx = play_chain(
+                        chain,
+                        bpm,
+                        midi_port,
+                        stdscr,
+                        grid_win,
+                        chain_win,
+                        root,
+                        use_color,
+                        color_pairs,
+                        chain_selected_idx,
+                        _load,
+                    )
                     mode = "VIEW"
             continue
 
