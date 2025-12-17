@@ -648,5 +648,20 @@ def stepseq_mode(
         modified = (_grid_signature(grid) != baseline_sig)
         draw()
 
-    new_events =_apply_stepgrid_to_events(grid, meta, non_grid)
+    # --- Restore curses state for APS main ---
+    try:
+        curses.curs_set(0)
+    except curses.error:
+        pass
+
+    try:
+        stdscr.keypad(True)
+        curses.noecho()
+        curses.cbreak()
+        stdscr.clear()
+        stdscr.refresh()
+    except curses.error:
+        pass
+
+    new_events = _apply_stepgrid_to_events(grid, meta, non_grid)
     return modified, saved, new_events

@@ -1936,6 +1936,29 @@ def main_curses(stdscr):
                                 chain_selected_idx,
                                 _load,
                             )
+                    else:
+
+                        def _load(path):
+                            return (
+                                load_adt(path)
+                                if path.lower().endswith(".adt")
+                                else load_adp(path)
+                            )
+
+                        chain_selected_idx = play_chain(
+                            chain,
+                            bpm,
+                            midi_port,
+                            stdscr,
+                            grid_win,
+                            chain_win,
+                            root,
+                            use_color,
+                            color_pairs,
+                            chain_selected_idx,
+                            _load,
+                        )
+
 
                     
                     try:
