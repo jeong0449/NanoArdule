@@ -1081,6 +1081,95 @@ def _nc_dialog(
             pass
 
 
+def dialog_input(stdscr, prompt: str, default_text: str = "", maxlen: int = 64) -> str | None:
+    """
+    Norton-Commander style centered input dialog.
+    Returns entered string, or None if canceled (ESC).
+    """
+    import curses
+
+    h = 7
+    visible_len = min(maxlen, 24)
+    content_w = max(len(prompt), visible_len)
+    w = max(44, min(70, content_w + 12))
+
+    max_y, max_x = stdscr.getmaxyx()
+    y = max(0, (max_y - h) // 2)
+    x = max(0, (max_x - w) // 2)
+
+    win = curses.newwin(h, w, y, x)
+    win.keypad(True)
+    win.box()
+
+    win.addstr(1, 2, prompt[: w - 4])
+
+    field_y, field_x = 3, 2
+    field_w = w - 4
+    win.addstr(field_y, field_x, " " * field_w, curses.A_REVERSE)
+
+    text = (default_text or "")[:maxlen]
+    cursor = len(text)
+
+    hint = "Enter=OK  Esc=Cancel"
+    if len(hint) < w - 4:
+        win.addstr(5, w - 2 - len(hint), hint)
+
+    try:
+        curses.curs_set(1)
+    except Exception:
+        pass
+
+    while True:
+        shown = text[:field_w].ljust(field_w)
+        win.addstr(field_y, field_x, shown, curses.A_REVERSE)
+
+        cx = field_x + min(cursor, field_w - 1)
+        win.move(field_y, cx)
+        win.refresh()
+
+        ch = win.getch()
+
+        if ch == 27:  # ESC
+            try:
+                curses.curs_set(0)
+            except Exception:
+                pass
+            return None
+
+        if ch in (10, 13, curses.KEY_ENTER):  # Enter
+            try:
+                curses.curs_set(0)
+            except Exception:
+                pass
+            return text.strip()
+
+        if ch in (curses.KEY_BACKSPACE, 8, 127):
+            if cursor > 0:
+                text = text[: cursor - 1] + text[cursor:]
+                cursor -= 1
+            continue
+
+        if ch == curses.KEY_DC:
+            if cursor < len(text):
+                text = text[:cursor] + text[cursor + 1 :]
+            continue
+
+        if ch == curses.KEY_LEFT:
+            cursor = max(0, cursor - 1); continue
+        if ch == curses.KEY_RIGHT:
+            cursor = min(len(text), cursor + 1); continue
+        if ch == curses.KEY_HOME:
+            cursor = 0; continue
+        if ch == curses.KEY_END:
+            cursor = len(text); continue
+
+        if 32 <= ch <= 126:
+            if len(text) < maxlen:
+                text = text[:cursor] + chr(ch) + text[cursor:]
+                cursor += 1
+            continue
+
+
 def dialog_alert(stdscr, message: str, button: str = "OK") -> None:
     """Show a NC-style alert dialog. Returns after confirmation."""
     _nc_dialog(stdscr, message, buttons=(button,), default=0)

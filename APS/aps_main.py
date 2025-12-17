@@ -104,6 +104,7 @@ from aps_ui import (
     choose_countin_curses,
     dialog_confirm,
     dialog_alert,
+    dialog_input,
 
 )
 from aps_chainedit import handle_chain_keys
@@ -1323,9 +1324,23 @@ def main_curses(stdscr):
 
             # ARR 저장: ADP가 섞여 있으면 ARR에는 .ADT로 바꿔서 저장 + 메시지
             if not chain:
-                msg = "체인이 비어 있음"
+                try:
+                    dialog_alert(stdscr, "Chain is empty.")
+                except Exception:
+                    pass
+                msg = "Chain is empty."
                 continue
-            t = prompt_text(stdscr, "ARR filename:")
+            ok = dialog_confirm(
+                stdscr,
+                "Save ARR file?",
+                yes_label="SAVE",
+                no_label="CANCEL",
+                default_yes=True,
+            )
+            if not ok:
+                msg = "Save canceled."
+                continue
+            t = dialog_input(stdscr, "ARR filename:", default_text="", maxlen=64)
             if t is None:
                 msg = "Save canceled."
                 continue
@@ -1390,7 +1405,7 @@ def main_curses(stdscr):
 
         # F9: BPM 변경
         if ch == curses.KEY_F9:
-            s = prompt_text(stdscr, f"BPM (current {bpm}):", maxlen=6)
+            s = dialog_input(stdscr, f"BPM (current {bpm}):", default_text=str(bpm), maxlen=6)
             if s is None:
                 # canceled
                 continue
