@@ -1,3 +1,18 @@
+# ================================================================
+# APS_UI - Build/Version Stamp
+# ------------------------------------------------
+# BUILD_DATE_KST : 2025-12-17
+# BUILD_TAG      : aps_ui-20251217
+# CHANGE_NOTE    : UI: Norton Commander style dialog_confirm/dialog_alert (no shadow, no title).
+#
+# Tip: If you are using git, also record the commit hash:
+#   git rev-parse --short HEAD
+# ================================================================
+
+APS_UI_BUILD_DATE_KST = "2025-12-17"
+APS_UI_BUILD_TAG = "aps_ui-20251217"
+APS_UI_CHANGE_NOTE = 'UI: Norton Commander style dialog_confirm/dialog_alert (no shadow, no title).'
+
 # aps_ui.py — curses UI helpers for APS v0.27+
 import curses
 from typing import List, Optional, Tuple
@@ -919,3 +934,167 @@ def show_help_curses(stdscr):
             pass
     win.refresh()
     win.getch()
+# ======== Norton-Commander style dialogs (added) ========
+
+def _wrap_lines(text: str, width: int) -> List[str]:
+    """Wrap text into lines not exceeding width (simple word wrap)."""
+    if width <= 1:
+        return [text[:1]]
+    words = text.split()
+    if not words:
+        return [""]
+    lines: List[str] = []
+    cur = words[0]
+    for w in words[1:]:
+        if len(cur) + 1 + len(w) <= width:
+            cur += " " + w
+        else:
+            lines.append(cur)
+            cur = w
+    lines.append(cur)
+    return lines
+
+
+def _nc_dialog(
+    stdscr,
+    message: str,
+    buttons: Tuple[str, ...] = ("OK",),
+    default: int = 0,
+    min_w: int = 34,
+    pad_w: int = 6,
+    pad_h: int = 6,
+) -> int:
+    """Norton Commander-style modal dialog (no title, no shadow).
+
+    Returns selected button index.
+    Keys:
+      - Left/Right/Tab: move selection
+      - Enter: confirm
+      - Esc: cancel => returns last button index if 2+ buttons else 0
+      - Resize: redraw
+    """
+    if not buttons:
+        buttons = ("OK",)
+    sel = max(0, min(default, len(buttons) - 1))
+
+    while True:
+        max_y, max_x = stdscr.getmaxyx()
+
+        inner_max_w = max(10, max_x - 4)
+        wrap_w = max(10, inner_max_w - pad_w)
+
+        lines: List[str] = []
+        for para in message.split("\n"):
+            if para.strip():
+                lines.extend(_wrap_lines(para, wrap_w))
+            else:
+                lines.append("")
+
+        btn_tokens = [f"[{b}]" for b in buttons]
+        btn_row = "  ".join(btn_tokens)
+
+        content_w = max(max((len(s) for s in lines), default=0), len(btn_row))
+        w = min(max(min_w, content_w + pad_w), max_x - 2) if max_x >= 10 else max_x
+        w = max(10, w)
+
+        content_h = len(lines)
+        h = min(max(7, content_h + pad_h), max_y - 2) if max_y >= 10 else max_y
+        h = max(7, h)
+
+        y = max(0, (max_y - h) // 2)
+        x = max(0, (max_x - w) // 2)
+
+        win = curses.newwin(h, w, y, x)
+        win.keypad(True)
+        win.erase()
+        win.box()
+
+        msg_x = 3
+        msg_y = 2
+        max_msg_lines = max(1, h - 5)
+        for i, s in enumerate(lines[:max_msg_lines]):
+            try:
+                win.addnstr(msg_y + i, msg_x, s, max(1, w - 6))
+            except curses.error:
+                pass
+
+        btn_y = h - 3
+        btn_row_len = len(btn_row)
+        btn_x = max(2, (w - btn_row_len) // 2)
+
+        cur_x = btn_x
+        for i, token in enumerate(btn_tokens):
+            attr = curses.A_REVERSE if i == sel else 0
+            try:
+                win.addstr(btn_y, cur_x, token, attr)
+            except curses.error:
+                pass
+            cur_x += len(token)
+            if i != len(btn_tokens) - 1:
+                try:
+                    win.addstr(btn_y, cur_x, "  ")
+                except curses.error:
+                    pass
+                cur_x += 2
+
+        win.refresh()
+        ch = win.getch()
+
+        if ch == curses.KEY_RESIZE:
+            try:
+                curses.update_lines_cols()
+            except Exception:
+                pass
+            try:
+                curses.resizeterm(*stdscr.getmaxyx())
+            except Exception:
+                pass
+            continue
+
+        if ch in (10, 13):
+            try:
+                win.erase()
+                win.refresh()
+            except Exception:
+                pass
+            del win
+            stdscr.touchwin()
+            stdscr.refresh()
+            return sel
+
+        if ch == 27:
+            try:
+                win.erase()
+                win.refresh()
+            except Exception:
+                pass
+            del win
+            stdscr.touchwin()
+            stdscr.refresh()
+            return (len(buttons) - 1) if len(buttons) >= 2 else 0
+
+        if ch in (curses.KEY_LEFT, ord("h")):
+            sel = (sel - 1) % len(buttons)
+        elif ch in (curses.KEY_RIGHT, ord("l"), 9):
+            sel = (sel + 1) % len(buttons)
+        else:
+            pass
+
+
+def dialog_alert(stdscr, message: str, button: str = "OK") -> None:
+    """Show a NC-style alert dialog. Returns after confirmation."""
+    _nc_dialog(stdscr, message, buttons=(button,), default=0)
+    return
+
+
+def dialog_confirm(
+    stdscr,
+    message: str,
+    yes_label: str = "YES",
+    no_label: str = "NO",
+    default_yes: bool = False,
+) -> bool:
+    """Show a NC-style confirm dialog. Returns True for YES, False for NO/ESC."""
+    default = 0 if default_yes else 1
+    idx = _nc_dialog(stdscr, message, buttons=(yes_label, no_label), default=default)
+    return idx == 0

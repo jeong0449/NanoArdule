@@ -1,3 +1,18 @@
+# ================================================================
+# APS_MAIN - Build/Version Stamp
+# ------------------------------------------------
+# BUILD_DATE_KST : 2025-12-17
+# BUILD_TAG      : aps_main-20251217
+# CHANGE_NOTE    : Unified main: NC dialogs, warnings, ARR #COUNTIN, shared MIDI out_port, color re-init.
+#
+# Tip: If you are using git, also record the commit hash:
+#   git rev-parse --short HEAD
+# ================================================================
+
+APS_MAIN_BUILD_DATE_KST = "2025-12-17"
+APS_MAIN_BUILD_TAG = "aps_main-20251217"
+APS_MAIN_CHANGE_NOTE = 'Unified main: NC dialogs, warnings, ARR #COUNTIN, shared MIDI out_port, color re-init.'
+
 
 def write_adt_file_v22a(path: str, pat):
     """
@@ -87,6 +102,9 @@ from aps_ui import (
     choose_paste_position_curses,
     show_help_curses,
     choose_countin_curses,
+    dialog_confirm,
+    dialog_alert,
+
 )
 from aps_chainedit import handle_chain_keys
 from aps_countin import get_countin_presets  # 내장 카운트-인 패턴들 (이름/메타 용)
@@ -97,6 +115,9 @@ except ImportError:
     mido = None
 
 import aps_stepseq
+
+# Used by show_warning_popup wrapper to call NC-style dialogs without threading stdscr everywhere.
+_GLOBAL_STDSCR_FOR_DIALOGS = None
 
 def toggle_p_b(fname: str) -> Optional[str]:
     """
@@ -147,33 +168,39 @@ def find_gs():
 def main_curses(stdscr):
     curses.curs_set(0)
     stdscr.keypad(True)
+    global _GLOBAL_STDSCR_FOR_DIALOGS
+    _GLOBAL_STDSCR_FOR_DIALOGS = stdscr
+
 
     use_color = False    # 색상 사용 여부
     color_pairs = {}
     highlight_unfocused_pair = 0  # 비포커스 하이라이트용 컬러 페어 번호
 
-    if curses.has_colors():
-        use_color = True
-        curses.start_color()
-        curses.use_default_colors()
-        color_pairs = {
-            "n": 1,
-            "n2": 2,
-            "acc1": 3,
-            "acc2": 4,
-            "acc3": 5,
-            "play": 6,
-        }
-        curses.init_pair(color_pairs["n"], curses.COLOR_WHITE, -1)
-        curses.init_pair(color_pairs["n2"], curses.COLOR_CYAN, -1)
-        curses.init_pair(color_pairs["acc1"], curses.COLOR_GREEN, -1)
-        curses.init_pair(color_pairs["acc2"], curses.COLOR_YELLOW, -1)
-        curses.init_pair(color_pairs["acc3"], curses.COLOR_RED, -1)
-        curses.init_pair(color_pairs["play"], curses.COLOR_BLUE, -1)
+    def init_main_colors():
+        nonlocal use_color, color_pairs, highlight_unfocused_pair
+        use_color = False
+        color_pairs = {}
+        highlight_unfocused_pair = 0
+        if curses.has_colors():
+            use_color = True
+            curses.start_color()
+            try:
+                curses.use_default_colors()
+            except Exception:
+                pass
+            # main UI pairs (1–99)
+            color_pairs = {"n": 1, "n2": 2, "acc1": 3, "acc2": 4, "acc3": 5, "play": 6}
+            curses.init_pair(color_pairs["n"], curses.COLOR_WHITE, -1)
+            curses.init_pair(color_pairs["n2"], curses.COLOR_CYAN, -1)
+            curses.init_pair(color_pairs["acc1"], curses.COLOR_GREEN, -1)
+            curses.init_pair(color_pairs["acc2"], curses.COLOR_YELLOW, -1)
+            curses.init_pair(color_pairs["acc3"], curses.COLOR_RED, -1)
+            curses.init_pair(color_pairs["play"], curses.COLOR_BLUE, -1)
+            highlight_unfocused_pair = 10
+            curses.init_pair(highlight_unfocused_pair, curses.COLOR_CYAN, -1)
 
-        # 비포커스 창 하이라이트용 (현재는 시안 텍스트)
-        highlight_unfocused_pair = 10
-        curses.init_pair(highlight_unfocused_pair, curses.COLOR_CYAN, -1)
+    init_main_colors()
+
 
     # 패턴 루트 디렉터리:
     #   - ./patterns 폴더가 있으면 그쪽을 우선 사용
@@ -786,6 +813,13 @@ def main_curses(stdscr):
             play_callback=play_stepseq,
             drum_lanes=drum_lanes,
         )
+
+        # Restore main UI colors/pairs in case StepSeq modified curses state
+        try:
+            init_main_colors()
+        except Exception:
+            pass
+
         # 9) 변경 사항도 없고 저장도 안 하면 그대로 종료
         if (not modified) and (not saved):
             msg = "StepSeq: 변경 없음"
@@ -1131,21 +1165,35 @@ def main_curses(stdscr):
 
         # Quit (q / F10) - no Enter required
         if ch in (ord("q"), curses.KEY_F10):
-            max_yq, max_xq = stdscr.getmaxyx()
-            msg_text = "Quit APS? (y/q = yes, other = no)"
-            yq = max_yq // 2
-            xq = max(0, (max_xq - len(msg_text)) // 2)
             try:
-                stdscr.addnstr(yq, xq, msg_text, len(msg_text), curses.A_REVERSE)
-            except curses.error:
-                pass
-            stdscr.refresh()
-            kq = stdscr.getch()
-            if kq in (ord("y"), ord("Y"), ord("q"), ord("Q")):
-                break  # exit program
-            else:
+                ok = dialog_confirm(
+                    stdscr,
+                    "Quit APS?",
+                    yes_label="YES",
+                    no_label="NO",
+                    default_yes=False,
+                )
+                if ok:
+                    break
                 msg = "Quit canceled."
-                continue  # keep running
+                continue
+            except Exception:
+                # Fallback: legacy inline prompt
+                max_yq, max_xq = stdscr.getmaxyx()
+                msg_text = "Quit APS? (y/q = yes, other = no)"
+                yq = max_yq // 2
+                xq = max(0, (max_xq - len(msg_text)) // 2)
+                try:
+                    stdscr.addnstr(yq, xq, msg_text, len(msg_text), curses.A_REVERSE)
+                except curses.error:
+                    pass
+                stdscr.refresh()
+                kq = stdscr.getch()
+                if kq in (ord("y"), ord("Y"), ord("q"), ord("Q")):
+                    break  # exit program
+                else:
+                    msg = "Quit canceled."
+                    continue  # keep running
 
         # Ctrl+Z: Undo
         if ch == 26:  # ASCII SUB
@@ -1670,6 +1718,7 @@ def main_curses(stdscr):
                     arr_name = arr_files[selected_idx]
                     arr_path = os.path.join(root, arr_name)
                     try:
+                        load_countin_from_arr(arr_path)
                         parsed = parse_arr(arr_path)
                         if isinstance(parsed, tuple) and len(parsed) >= 2:
                             arr_chain, _arr_bpm = parsed[0], parsed[1]
@@ -1803,42 +1852,67 @@ def main_curses(stdscr):
 
                     mode = "CHAIN"
 
+                    out_port = None
                     if (
                         mido is not None
                         and countin_idx is not None
                         and countin_idx >= 0
                         and 0 <= countin_idx < len(countin_presets)
                     ):
+
+                        def _load(path):
+                            return (
+                                load_adt(path)
+                                if path.lower().endswith(".adt")
+                                else load_adp(path)
+                            )
+
                         try:
-                            quarter = 60.0 / float(bpm)
-                            note = 42
+                            out_port = mido.open_output(midi_port)
+                            # Count-in (4 fixed hits)
+                            # NOTE: keep using same out_port for main playback to avoid reopen delay.
+                            note = 42  # Closed HH by default
                             vel = 100
-                            chn = 9
+                            ch9 = 9
+                            quarter = 60.0 / float(bpm)
+                            # Prefetch the first MAIN pattern to avoid a gap after count-in (warms disk/cache).
+                            try:
+                                _start_i = chain_selected_idx
+                                if 0 <= _start_i < len(chain):
+                                    _entry0 = chain[_start_i]
+                                    _path0 = os.path.join(root, _entry0.filename)
+                                    if os.path.isfile(_path0):
+                                        load_pattern(_path0)
+                            except Exception:
+                                pass
+                            time.sleep(min(0.05, quarter * 0.1))  # allow port/device to settle before first hit
+                            on_frac = 0.35
+                            off_frac = 0.65
+                            for _i in range(4):
+                                out_port.send(mido.Message('note_on', note=note, velocity=vel, channel=ch9))
+                                time.sleep(quarter * on_frac)
+                                out_port.send(mido.Message('note_off', note=note, velocity=0, channel=ch9))
+                                # Wait the remaining beat so MAIN starts on the next downbeat
+                                time.sleep(quarter * off_frac)
 
-                            on_frac = 0.15
-                            off_frac = 0.85
-
-                            with mido.open_output(midi_port) as port:
-                                for _ in range(4):
-                                    port.send(
-                                        mido.Message(
-                                            "note_on",
-                                            note=note,
-                                            velocity=vel,
-                                            channel=chn,
-                                        )
-                                    )
-                                    time.sleep(quarter * on_frac)
-
-                                    port.send(
-                                        mido.Message(
-                                            "note_off",
-                                            note=note,
-                                            velocity=0,
-                                            channel=chn,
-                                        )
-                                    )
-                                    time.sleep(quarter * off_frac)
+                            chain_selected_idx = play_chain(
+                                chain,
+                                bpm,
+                                midi_port,
+                                stdscr,
+                                grid_win,
+                                chain_win,
+                                root,
+                                use_color,
+                                color_pairs,
+                                chain_selected_idx,
+                                _load,
+                                out=out_port,
+                            )
+                            try:
+                                out_port.close()
+                            except Exception:
+                                pass
                         except Exception as e:
                             show_warning_popup(
                                 [
@@ -1849,27 +1923,28 @@ def main_curses(stdscr):
                                 title="Warning",
                             )
 
-                    def _load(path):
-                        return (
-                            load_adt(path)
-                            if path.lower().endswith(".adt")
-                            else load_adp(path)
-                        )
+                            chain_selected_idx = play_chain(
+                                chain,
+                                bpm,
+                                midi_port,
+                                stdscr,
+                                grid_win,
+                                chain_win,
+                                root,
+                                use_color,
+                                color_pairs,
+                                chain_selected_idx,
+                                _load,
+                            )
 
-                    chain_selected_idx = play_chain(
-                        chain,
-                        bpm,
-                        midi_port,
-                        stdscr,
-                        grid_win,
-                        chain_win,
-                        root,
-                        use_color,
-                        color_pairs,
-                        chain_selected_idx,
-                        _load,
-                    )
-                    mode = "VIEW"
+                    
+                    try:
+                        if out_port is not None:
+                            out_port.close()
+                    except Exception:
+                        pass
+
+            mode = "VIEW"
             continue
 
         if ch in (ord("r"), ord("R")):

@@ -1,3 +1,18 @@
+# ================================================================
+# APS_STEPSEQ - Build/Version Stamp
+# ------------------------------------------------
+# BUILD_DATE_KST : 2025-12-17
+# BUILD_TAG      : aps_stepseq-20251217
+# CHANGE_NOTE    : StepSeq: cursor-only accent background, NC quit-without-saving dialog, legend inline text.
+#
+# Tip: If you are using git, also record the commit hash:
+#   git rev-parse --short HEAD
+# ================================================================
+
+APS_STEPSEQ_BUILD_DATE_KST = "2025-12-17"
+APS_STEPSEQ_BUILD_TAG = "aps_stepseq-20251217"
+APS_STEPSEQ_CHANGE_NOTE = 'StepSeq: cursor-only accent background, NC quit-without-saving dialog, legend inline text.'
+
 # aps_stepseq.py
 # Step Sequencer module for APS (Ardule Pattern Studio)
 #
@@ -11,6 +26,13 @@ import curses
 from dataclasses import dataclass, field
 from typing import List, Callable, Optional, Tuple
 
+
+
+# NC-style dialog (defined in aps_ui.py)
+try:
+    from aps_ui import dialog_confirm
+except Exception:
+    dialog_confirm = None
 
 # ----------------------------------------------------------------------
 # Data structures
@@ -261,6 +283,32 @@ def stepseq_mode(
     stdscr.clear()
     stdscr.refresh()
 
+
+    # --- StepSeq local color pairs (avoid clobbering main UI) ---
+    # NOTE: main screen should re-init its own pairs after StepSeq returns,
+    # but we still keep StepSeq pairs in a high range to minimize collisions.
+    has_colors = curses.has_colors()
+    if has_colors:
+        try:
+            curses.start_color()
+        except curses.error:
+            has_colors = False
+
+    # Cursor-only accent background (non-cursor cells stay plain white text)
+    # Pair numbers chosen to be high and unlikely to collide with APS main.
+    P_CURSOR_REST = 201  # '.' at cursor: white background
+    P_CURSOR_L1   = 202  # '-' at cursor
+    P_CURSOR_L2   = 203  # 'X' at cursor
+    P_CURSOR_L3   = 204  # 'O' at cursor
+
+    if has_colors:
+        try:
+            curses.init_pair(P_CURSOR_REST, curses.COLOR_BLACK, curses.COLOR_WHITE)
+            curses.init_pair(P_CURSOR_L1,   curses.COLOR_WHITE, curses.COLOR_BLUE)
+            curses.init_pair(P_CURSOR_L2,   curses.COLOR_BLACK, curses.COLOR_CYAN)
+            curses.init_pair(P_CURSOR_L3,   curses.COLOR_WHITE, curses.COLOR_MAGENTA)
+        except curses.error:
+            has_colors = False
     # events -> grid (우리는 APS에서 grid로 변환해서 넘겨도 되지만, 여기서 다시 한번 만들어 씀)
     grid, non_grid = _build_stepgrid_from_events(drum_events, meta, drum_lanes=drum_lanes)
 
@@ -272,7 +320,7 @@ def stepseq_mode(
     cur_step = 0
     page = 0   # 0 = step 0–15, 1 = step 16–31
 
-    max_y, max_x = stdscr.getmaxyx()
+    # NOTE: max_y/max_x are queried inside draw() to stay stable across terminal resizes.
 
     # Dirty-state tracking: show '*' only when current grid differs from baseline (saved/original)
     def _grid_signature(g: StepGrid):
@@ -298,6 +346,7 @@ def stepseq_mode(
         page = 0 if cur_step < 16 else 1
 
     def draw():
+        max_y, max_x = stdscr.getmaxyx()
         stdscr.erase()
 
         # Draw frame
@@ -356,27 +405,79 @@ def stepseq_mode(
                 cell = lane.cells[s]
                 if cell.on:
                     lvl = vel_to_level(cell.vel)
+                    # UI 표시용 문자(데이터에는 영향 없음): 평상시에도 대문자 표시
                     if lvl <= 0:
                         ch = "."
                     elif lvl == 1:
                         ch = "-"
                     elif lvl == 2:
-                        ch = "x"
+                        ch = "X"
                     else:
-                        ch = "o"
+                        ch = "O"
                 else:
+                    lvl = 0
                     ch = "."
-                attr = curses.A_REVERSE if (li == cur_lane and s == cur_step) else 0
+
+                is_cursor = (li == cur_lane and s == cur_step)
+
+                # 커서 위치에서만 배경색(액센트)을 보여줌. 그 외는 흰색 문자만.
+                if is_cursor:
+                    if has_colors:
+                        if lvl <= 0:
+                            attr = curses.color_pair(P_CURSOR_REST)
+                        elif lvl == 1:
+                            attr = curses.color_pair(P_CURSOR_L1)
+                        elif lvl == 2:
+                            attr = curses.color_pair(P_CURSOR_L2)
+                        else:
+                            attr = curses.color_pair(P_CURSOR_L3)
+                    else:
+                        attr = curses.A_REVERSE
+                else:
+                    attr = 0
+
                 try:
                     stdscr.addnstr(y, col, " " + ch, 2, attr)
                 except curses.error:
                     pass
+
+                except curses.error:
+                    pass
                 col += 3
 
-        # Velocity legend
-        legend = "Legend: . rest  - soft  x medium  o strong"
+        # Velocity legend (symbol uses same accent background style; text stays normal)
         try:
-            stdscr.addnstr(max_y - 4, 2, legend.ljust(max_x - 4), max_x - 4)
+            y_leg = max_y - 4
+            x = 2
+            stdscr.addnstr(y_leg, x, "Legend: ", max_x - x)
+            x += len("Legend: ")
+
+            def _draw_leg(sym: str, pair: int, label: str):
+                nonlocal x
+                # draw a 2-char "cell" like the grid: ' ' + sym with accent background
+                if has_colors:
+                    a = curses.color_pair(pair)
+                else:
+                    a = curses.A_REVERSE
+                try:
+                    stdscr.addnstr(y_leg, x, " " + sym, 2, a)
+                except curses.error:
+                    return
+                x += 2
+                # a single space, then label
+                try:
+                    stdscr.addnstr(y_leg, x, " " + label + "  ", max_x - x)
+                except curses.error:
+                    return
+                x += len(" " + label + "  ")
+
+            _draw_leg(".", P_CURSOR_REST, "REST")
+            _draw_leg("-", P_CURSOR_L1, "SOFT")
+            _draw_leg("X", P_CURSOR_L2, "MEDIUM")
+            _draw_leg("O", P_CURSOR_L3, "STRONG")
+        except curses.error:
+            pass
+
         except curses.error:
             pass
 
@@ -389,7 +490,27 @@ def stepseq_mode(
         stdscr.refresh()
 
     def confirm_quit():
+        """Confirm quitting StepSeq when there are unsaved changes.
+
+        Uses NC-style dialog from aps_ui.py if available; otherwise falls back to a simple prompt.
+        """
+        # Preferred: NC-style dialog (no title, no shadow, boxed)
+        if callable(dialog_confirm):
+            try:
+                return bool(dialog_confirm(
+                    stdscr,
+                    "Modified. Quit without saving?",
+                    yes_label="YES",
+                    no_label="NO",
+                    default_yes=False,
+                ))
+            except Exception:
+                # fall through to legacy prompt
+                pass
+
+        # Fallback: legacy inline prompt (centered)
         msg_text = "Modified. Quit without saving? (y/N)"
+        max_y, max_x = stdscr.getmaxyx()
         y = max_y // 2
         x = max(0, (max_x - len(msg_text)) // 2)
         try:
@@ -404,11 +525,15 @@ def stepseq_mode(
             if k in (ord("n"), ord("N"), 27, ord("\n")):
                 return False
 
+
     clamp_cursor()
     draw()
 
     while True:
         key = stdscr.getch()
+        if key == curses.KEY_RESIZE:
+            draw()
+            continue
 
         if key in (curses.KEY_UP, ord("k")):
             cur_lane -= 1
