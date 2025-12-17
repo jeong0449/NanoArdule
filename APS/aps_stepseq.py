@@ -304,9 +304,9 @@ def stepseq_mode(
     if has_colors:
         try:
             curses.init_pair(P_CURSOR_REST, curses.COLOR_BLACK, curses.COLOR_WHITE)
-            curses.init_pair(P_CURSOR_L1,   curses.COLOR_WHITE, curses.COLOR_BLUE)
-            curses.init_pair(P_CURSOR_L2,   curses.COLOR_BLACK, curses.COLOR_CYAN)
-            curses.init_pair(P_CURSOR_L3,   curses.COLOR_WHITE, curses.COLOR_MAGENTA)
+            curses.init_pair(P_CURSOR_L1,   curses.COLOR_BLACK, curses.COLOR_GREEN)
+            curses.init_pair(P_CURSOR_L2,   curses.COLOR_BLACK, curses.COLOR_YELLOW)
+            curses.init_pair(P_CURSOR_L3,   curses.COLOR_WHITE, curses.COLOR_RED)
         except curses.error:
             has_colors = False
     # events -> grid (우리는 APS에서 grid로 변환해서 넘겨도 되지만, 여기서 다시 한번 만들어 씀)
