@@ -110,9 +110,10 @@ Notes:
 
 ## 9. Pattern Body Rules
 
-- Each row has exactly `LENGTH` symbols
+- Each row contains exactly `LENGTH` symbols
 - Whitespace is ignored
-- One row per slot
+- One row represents a single logical slot
+- In rotated represntation, a row instead corresponds to an instrument layout
 
 ---
 
