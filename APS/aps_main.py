@@ -1340,13 +1340,19 @@ def main_curses(stdscr):
             if not ok:
                 msg = "Save canceled."
                 continue
-            t = dialog_input(stdscr, "ARR filename:", default_text="", maxlen=64)
-            if t is None:
+                
+            base = dialog_input(stdscr, "ARR filename:", default_text="", maxlen=64, suffix=".ARR")
+            if base is None:
                 msg = "Save canceled."
                 continue
-            if not t:
-                t = "chain.arr"
-            path = os.path.join(root, t)
+
+            if not base:
+                msg = "Filename is empty."
+                continue
+
+            arr_filename = base + ".ARR"
+
+            path = os.path.join(root, arr_filename)
             try:
                 # ADP → ADT 변환을 반영한 복사본을 만들어 저장
                 chain_for_save = [

@@ -1081,16 +1081,36 @@ def _nc_dialog(
             pass
 
 
-def dialog_input(stdscr, prompt: str, default_text: str = "", maxlen: int = 64) -> str | None:
+def dialog_input(
+    stdscr,
+    prompt: str,
+    default_text: str = "",
+    maxlen: int = 64,
+    suffix: str = "",
+    visible_len: int | None = None,
+) -> str | None:
     """
     Norton-Commander style centered input dialog.
-    Returns entered string, or None if canceled (ESC).
+
+    - Editable input field is shown in reverse video.
+    - Optional `suffix` (e.g., '.ARR') is shown to the right and is NOT editable.
+    - Returns the entered base string (without suffix), or None if canceled (ESC).
     """
     import curses
 
     h = 7
-    visible_len = min(maxlen, 24)
-    content_w = max(len(prompt), visible_len)
+
+    # How wide the editable field should look (independent from maxlen restriction).
+    if visible_len is None:
+        visible_len = min(maxlen, 24)
+    else:
+        visible_len = max(1, min(visible_len, maxlen))
+
+    # Reserve space for " "+suffix on the same line.
+    extra_for_suffix = (1 + len(suffix)) if suffix else 0
+
+    # Width heuristic (keep conservative)
+    content_w = max(len(prompt), visible_len + extra_for_suffix)
     w = max(44, min(70, content_w + 12))
 
     max_y, max_x = stdscr.getmaxyx()
@@ -1101,70 +1121,120 @@ def dialog_input(stdscr, prompt: str, default_text: str = "", maxlen: int = 64) 
     win.keypad(True)
     win.box()
 
-    win.addstr(1, 2, prompt[: w - 4])
+    # Prompt
+    try:
+        win.addstr(1, 2, prompt[: w - 4], curses.A_NORMAL)
+    except curses.error:
+        pass
 
-    field_y, field_x = 3, 2
-    field_w = w - 4
-    win.addstr(field_y, field_x, " " * field_w, curses.A_REVERSE)
+    field_y = 3
+    field_x = 2
+    field_total_w = w - 4  # inside border width
 
-    text = (default_text or "")[:maxlen]
-    cursor = len(text)
+    # IMPORTANT: editable_w must NOT eat suffix area.
+    reserve = extra_for_suffix if suffix else 0
+    editable_w = max(1, min(visible_len, field_total_w - reserve))
 
+    # Footer hint
     hint = "Enter=OK  Esc=Cancel"
     if len(hint) < w - 4:
-        win.addstr(5, w - 2 - len(hint), hint)
+        try:
+            win.addstr(5, w - 2 - len(hint), hint, curses.A_NORMAL)
+        except curses.error:
+            pass
+
+    text = (default_text or "")[:maxlen]
+    cursor = min(len(text), editable_w)
 
     try:
         curses.curs_set(1)
     except Exception:
         pass
 
+    def _draw_line():
+        """Redraw the whole input line safely: NORMAL clear -> REVERSE editable -> NORMAL suffix."""
+        # 1) clear whole line in NORMAL (so reverse doesn't "infect" the rest)
+        try:
+            win.addstr(field_y, field_x, " " * field_total_w, curses.A_NORMAL)
+        except curses.error:
+            pass
+
+        # 2) draw editable field area in REVERSE
+        shown = text[:editable_w].ljust(editable_w)
+        try:
+            win.addstr(field_y, field_x, shown, curses.A_REVERSE)
+        except curses.error:
+            pass
+
+        # 3) draw suffix in NORMAL (bold helps visibility)
+        if suffix:
+            sx = field_x + editable_w + 1  # one space gap
+            avail = field_total_w - (editable_w + 1)
+            if avail > 0:
+                try:
+                    win.addstr(field_y, sx, suffix[:avail], curses.A_BOLD)
+                except curses.error:
+                    pass
+
     while True:
-        shown = text[:field_w].ljust(field_w)
-        win.addstr(field_y, field_x, shown, curses.A_REVERSE)
+        _draw_line()
 
-        cx = field_x + min(cursor, field_w - 1)
-        win.move(field_y, cx)
+        # Cursor stays within editable field only
+        cx = field_x + min(cursor, max(0, editable_w - 1))
+        try:
+            win.move(field_y, cx)
+        except curses.error:
+            pass
+
         win.refresh()
-
         ch = win.getch()
 
-        if ch == 27:  # ESC
+        # ESC: cancel
+        if ch == 27:
             try:
                 curses.curs_set(0)
             except Exception:
                 pass
             return None
 
-        if ch in (10, 13, curses.KEY_ENTER):  # Enter
+        # Enter: accept
+        if ch in (10, 13, curses.KEY_ENTER):
             try:
                 curses.curs_set(0)
             except Exception:
                 pass
             return text.strip()
 
+        # Backspace variants
         if ch in (curses.KEY_BACKSPACE, 8, 127):
             if cursor > 0:
                 text = text[: cursor - 1] + text[cursor:]
                 cursor -= 1
             continue
 
+        # Delete
         if ch == curses.KEY_DC:
             if cursor < len(text):
                 text = text[:cursor] + text[cursor + 1 :]
             continue
 
+        # Left/Right/Home/End
         if ch == curses.KEY_LEFT:
-            cursor = max(0, cursor - 1); continue
+            cursor = max(0, cursor - 1)
+            continue
         if ch == curses.KEY_RIGHT:
-            cursor = min(len(text), cursor + 1); continue
+            cursor = min(min(len(text), editable_w), cursor + 1)
+            continue
         if ch == curses.KEY_HOME:
-            cursor = 0; continue
+            cursor = 0
+            continue
         if ch == curses.KEY_END:
-            cursor = len(text); continue
+            cursor = min(len(text), editable_w)
+            continue
 
+        # Printable ASCII only
         if 32 <= ch <= 126:
-            if len(text) < maxlen:
+            if len(text) < maxlen and cursor < editable_w:
                 text = text[:cursor] + chr(ch) + text[cursor:]
                 cursor += 1
             continue
