@@ -1078,6 +1078,27 @@ def main_curses(stdscr):
         stdscr.refresh()
 
         ch = stdscr.getch()
+        # --- terminal resize handling ---
+        if ch == curses.KEY_RESIZE:
+            try:
+                # Refresh curses' idea of screen size
+                curses.update_lines_cols()
+            except Exception:
+                pass
+
+            try:
+                h, w = stdscr.getmaxyx()
+                # Tell curses to resize internal structures
+                curses.resizeterm(h, w)
+            except Exception:
+                pass
+
+            # Force full redraw on next iteration
+            stdscr.erase()
+            stdscr.refresh()
+            continue
+        
+        
 
         # --- 헬퍼: 선택된 인덱스가 화면에 보이도록 스크롤 조정 ---
         def ensure_visible(total_len: int):
@@ -1317,7 +1338,7 @@ def main_curses(stdscr):
         # F7: 저장
         # - 합성 모드(composite_mode=True)면 HYB_P9xx.APT로 패턴 저장
         # - 그 외에는 기존처럼 ARR 저장
-        if ch == curses.KEY_F7:
+        if ch in (curses.KEY_F7, ord('w'), ord('W')):
             if composite_mode and composite_pattern is not None:
                 save_composite_pattern()
                 continue
@@ -1375,7 +1396,7 @@ def main_curses(stdscr):
                         path, "r", encoding="utf-8", errors="ignore"
                     ) as f:
                         for line in f:
-                            if line.startswith("#COUNTIN"):
+                            if line.startswith("#COUNTIN") or line.startswith("#SECTION"):
                                 continue
                             old_lines.append(line.rstrip("\n"))
 
@@ -1385,8 +1406,24 @@ def main_curses(stdscr):
                     else:
                         header = f"#COUNTIN {ci_label}"
 
+                    # derive section blocks from in-memory chain labels
+                    section_blocks = []
+                    cur_sec = None
+                    sec_start = 0
+                    for i, e in enumerate(chain):
+                        sec = getattr(e, "section", None)
+                        if sec != cur_sec:
+                            if cur_sec:
+                                section_blocks.append((cur_sec, sec_start, i - 1))
+                            cur_sec = sec
+                            sec_start = i
+                    if cur_sec:
+                        section_blocks.append((cur_sec, sec_start, len(chain) - 1))
+
                     with open(path, "w", encoding="utf-8") as f:
                         f.write(header + "\n")
+                        for sec, s2, e2 in section_blocks:
+                            f.write(f"#SECTION {sec} {s2} {e2}\n")
                         for ln in old_lines:
                             f.write(ln + "\n")
 
@@ -1553,32 +1590,40 @@ def main_curses(stdscr):
                 rng = selection.get_range()
                 if rng:
                     start, end = rng
-                    name = prompt_text(stdscr, "Section name:")
-                    if name:
-                        push_undo()
-                        ok = section_mgr.add_section(name, start, end)
+                    name = dialog_input(stdscr, "Section name:", default_text="", maxlen=24)
+                    if name is None:
+                        show_message(stdscr, "Section naming canceled.")
+                        selection.reset()
+                        continue
 
-                        if not ok:
-                            suffix = 2
-                            while not ok and suffix < 100:
-                                alt = f"{name}_{suffix}"
-                                ok = section_mgr.add_section(alt, start, end)
-                                if ok:
-                                    name = alt
-                                    break
-                                suffix += 1
+                    name = name.strip()
+                    if not name:
+                        show_message(stdscr, "Section name is empty.")
+                        selection.reset()
+                        continue
 
-                        if ok:
-                            for i in range(start, end + 1):
-                                chain[i].section = (
-                                    name if i == start else None
-                                )
-                            msg = f"Section '{name}' added"
-                        else:
-                            msg = "Section overlap error"
-                        show_message(stdscr, msg)
+                    push_undo()
+                    ok = section_mgr.add_section(name, start, end)
+
+                    if not ok:
+                        suffix = 2
+                        while not ok and suffix < 100:
+                            alt = f"{name}_{suffix}"
+                            ok = section_mgr.add_section(alt, start, end)
+                            if ok:
+                                name = alt
+                                break
+                            suffix += 1
+
+                    if ok:
+                        for i in range(start, end + 1):
+                            chain[i].section = name
+                        modified = True
+                        msg = f"Section '{name}' added"
+                    else:
+                        msg = "Section overlap error"
+                    show_message(stdscr, msg)
                     selection.reset()
-
             if ch not in (ord(" "),):
                 continue
 
