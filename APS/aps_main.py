@@ -911,7 +911,7 @@ def main_curses(stdscr):
 
         # Heuristic: draw_grid typically needs a small header + one row per slot.
         # Keep two extra blank rows for readability.
-        min_grid_h = max(6, slots_preview + 7)
+        min_grid_h = max(6, slots_preview + 5)
         grid_h = min(min_grid_h, right_h - 3)
         if grid_h < 6:
             grid_h = 6
