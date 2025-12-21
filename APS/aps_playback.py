@@ -8,6 +8,12 @@ import mido
 from aps_core import Pattern, ChainEntry, compute_timing
 from aps_ui import draw_grid
 
+from aps_sections import ChainSelection, SectionManager
+# Reusable dummy objects for drawing (do not recreate every frame)
+_DUMMY_SELECTION = ChainSelection()
+_DUMMY_SECTION_MGR = SectionManager()
+
+
 
 def velocity_from_acc(a: int) -> int:
     if a <= 0:
@@ -17,7 +23,6 @@ def velocity_from_acc(a: int) -> int:
     if a == 2:
         return 100
     return 120
-
 
 def play_pattern_on_output(
     p: Pattern,
@@ -32,46 +37,70 @@ def play_pattern_on_output(
     total_beats = beats * bars if beats else 4
     sec_per_beat = 60.0 / bpm
     step_sec = (total_beats * sec_per_beat) / p.length
+
+    # Gate must never exceed step duration
     gate = min(step_sec * 0.6, 0.08)
+    if gate > step_sec:
+        gate = step_sec
+
+    def _poll_space_to_stop():
+        """Return True if user pressed Space (stop)."""
+        try:
+            ch = stdscr.getch()
+            return (ch == ord(" "))
+        except Exception:
+            return False
 
     stdscr.nodelay(True)
     try:
+        # Absolute-time scheduler (prevents cumulative drift)
+        t_start = time.perf_counter()
+        t_step = t_start  # scheduled start time of current step
+
         for step in range(p.length):
-            try:
-                ch = stdscr.getch()
-                if ch == ord(' '):
-                    raise KeyboardInterrupt
-            except Exception:
-                pass
+            # Stop check (non-blocking)
+            if _poll_space_to_stop():
+                raise KeyboardInterrupt
 
             draw_grid(p, grid_win, step, use_color, color_pairs)
             stdscr.refresh()
 
+            # NOTE ON
             active = []
             for slot in range(p.slots):
                 acc = p.grid[step][slot]
                 vel = velocity_from_acc(acc)
                 if vel > 0:
                     note = p.slot_note[slot]
-                    msg_on = mido.Message('note_on', note=note, velocity=vel, channel=9)
+                    msg_on = mido.Message("note_on", note=note, velocity=vel, channel=9)
                     active.append(msg_on)
                     out.send(msg_on)
 
-            time.sleep(gate)
+            # Hold notes until gate end (absolute time)
+            t_gate_end = t_step + gate
+            while True:
+                if _poll_space_to_stop():
+                    raise KeyboardInterrupt
+                now = time.perf_counter()
+                if now >= t_gate_end:
+                    break
+                # Sleep in small chunks; absolute schedule prevents drift anyway
+                time.sleep(min(0.001, t_gate_end - now))
 
+            # NOTE OFF
             for msg_on in active:
-                out.send(mido.Message('note_off', note=msg_on.note, velocity=0, channel=msg_on.channel))
+                out.send(mido.Message("note_off", note=msg_on.note, velocity=0, channel=msg_on.channel))
 
-            rest = step_sec - gate
-            t0 = time.time()
-            while time.time() - t0 < rest:
-                try:
-                    ch = stdscr.getch()
-                    if ch == ord(' '):
-                        raise KeyboardInterrupt
-                except Exception:
-                    pass
-                time.sleep(0.002)
+            # Schedule next step (absolute time)
+            t_step += step_sec
+            while True:
+                if _poll_space_to_stop():
+                    raise KeyboardInterrupt
+                now = time.perf_counter()
+                if now >= t_step:
+                    break
+                time.sleep(min(0.001, t_step - now))
+
     finally:
         stdscr.nodelay(False)
 
@@ -134,7 +163,7 @@ def play_chain(
             entry = chain[i]
             from aps_ui import draw_chain_view  # local import to avoid cycle
             from aps_sections import ChainSelection, SectionManager
-            draw_chain_view(chain_win, chain, len(chain), True, i, ChainSelection(), SectionManager(), "")
+            draw_chain_view(chain_win, chain, len(chain), True, i, _DUMMY_SELECTION, _DUMMY_SECTION_MGR, "")
             stdscr.refresh()
 
             path = os.path.join(root, entry.filename)
