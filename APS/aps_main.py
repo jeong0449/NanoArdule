@@ -73,6 +73,7 @@ aps_main.py — APS v0.27 main curses loop + Ctrl+Z Undo + block edit + Count-in
 """
 
 import os
+import re
 import copy
 import curses
 import time
@@ -119,6 +120,127 @@ import aps_stepseq
 
 # Used by show_warning_popup wrapper to call NC-style dialogs without threading stdscr everywhere.
 _GLOBAL_STDSCR_FOR_DIALOGS = None
+
+
+def _list_section_names(section_mgr):
+    # Best-effort: support different SectionManager implementations
+    if section_mgr is None:
+        return []
+    for attr in ("list_sections", "get_section_names"):
+        fn = getattr(section_mgr, attr, None)
+        if callable(fn):
+            try:
+                names = list(fn())
+                return [str(n) for n in names]
+            except Exception:
+                pass
+    # try common internal containers
+    for attr in ("sections", "_sections", "section_map"):
+        m = getattr(section_mgr, attr, None)
+        if isinstance(m, dict):
+            return [str(k) for k in m.keys()]
+    return []
+
+def _get_section_range(section_mgr, name):
+    # returns (start,end) 0-based inclusive if possible
+    if section_mgr is None or not name:
+        return None
+    for attr in ("get_range", "range", "get_section_range"):
+        fn = getattr(section_mgr, attr, None)
+        if callable(fn):
+            try:
+                r = fn(name)
+                if r and len(r) == 2:
+                    return (int(r[0]), int(r[1]))
+            except Exception:
+                pass
+    for attr in ("sections", "_sections", "section_map"):
+        m = getattr(section_mgr, attr, None)
+        if isinstance(m, dict) and name in m:
+            r = m.get(name)
+            if r and len(r) == 2:
+                return (int(r[0]), int(r[1]))
+    return None
+
+def _remove_section(section_mgr, name):
+    if section_mgr is None or not name:
+        return False
+    for attr in ("remove_section", "delete_section", "remove", "del_section"):
+        fn = getattr(section_mgr, attr, None)
+        if callable(fn):
+            try:
+                fn(name)
+                return True
+            except Exception:
+                pass
+    for attr in ("sections", "_sections", "section_map"):
+        m = getattr(section_mgr, attr, None)
+        if isinstance(m, dict) and name in m:
+            try:
+                del m[name]
+                return True
+            except Exception:
+                pass
+    return False
+
+def _prompt_section_name_with_list(stdscr, section_mgr, title="Section name"):
+    """Prompt for a new section name while showing existing names. Returns string or None (cancel)."""
+    existing = _list_section_names(section_mgr)
+    existing_sorted = sorted(existing, key=lambda s: s.lower())
+
+    max_y, max_x = stdscr.getmaxyx()
+    h = min(max_y - 4, max(12, 7 + min(len(existing_sorted), 20)))
+    # width: at least 60, or enough for longest name + margin
+    longest = max([len(title)] + [len(s) for s in existing_sorted] + [20])
+    w = min(max_x - 4, max(60, longest + 8))
+    y = max(0, (max_y - h) // 2)
+    x = max(0, (max_x - w) // 2)
+
+    win = curses.newwin(h, w, y, x)
+    win.keypad(True)
+    # Match the look of other input dialogs: reverse-video popup
+    win.bkgd(' ', curses.A_REVERSE)
+
+    def redraw(current_text):
+        win.erase()
+        win.box()
+        win.addstr(1, 2, title[: w - 4])
+        win.addstr(3, 2, "Existing sections:")
+
+        list_y = 4
+        max_list_lines = h - 8
+        for i, nm in enumerate(existing_sorted[:max_list_lines]):
+            shown = nm[: w - 6]
+            win.addstr(list_y + i, 4, shown)
+
+        if len(existing_sorted) > max_list_lines:
+            win.addstr(list_y + max_list_lines, 4, f"... ({len(existing_sorted)} total)")
+
+        prompt = "Name: " + (current_text or "")
+        win.addstr(h - 3, 2, prompt[: w - 4])
+        win.addstr(h - 2, 2, "Enter=OK  ESC=Cancel")
+        win.refresh()
+
+    text = ""
+    redraw(text)
+
+    while True:
+        ch = win.getch()
+        if ch == 27:  # ESC
+            return None
+        if ch in (10, 13):  # Enter
+            return text
+        if ch in (curses.KEY_BACKSPACE, 127, 8):
+            text = text[:-1]
+            redraw(text)
+            continue
+        if 0 <= ch <= 255:
+            c = chr(ch)
+            if c.isprintable():
+                if len(text) < 24:
+                    text += c
+                    redraw(text)
+            continue
 
 def toggle_p_b(fname: str) -> Optional[str]:
     """
@@ -1420,11 +1542,45 @@ def main_curses(stdscr):
                     if cur_sec:
                         section_blocks.append((cur_sec, sec_start, len(chain) - 1))
 
+                    # build pool index map (filename -> 1-based index) from the just-written ARR lines
+                    pool_index_by_name = {}
+                    for _ln in old_lines:
+                        _m_pool = re.match(r"^(\d+)\s*=\s*(.+)$", _ln.strip())
+                        if _m_pool:
+                            try:
+                                pool_index_by_name[_m_pool.group(2).strip()] = int(_m_pool.group(1))
+                            except Exception:
+                                pass
+
+                    # build #PLAY sequence including bare patterns between sections
+                    play_lines = []
+                    last_section = None
+                    for _e in chain:
+                        _sec = getattr(_e, "section", None)
+                        if _sec:
+                            if _sec != last_section:
+                                play_lines.append(str(_sec))
+                                last_section = _sec
+                        else:
+                            last_section = None
+                            _fn = getattr(_e, "filename", "")
+                            _rep = int(getattr(_e, "repeats", 1) or 1)
+                            _idx = pool_index_by_name.get(_fn)
+                            _token = f"@{_idx}" if _idx is not None else f"@{_fn}"
+                            if _rep > 1:
+                                _token = f"{_token}x{_rep}"
+                            play_lines.append(_token)
+
                     with open(path, "w", encoding="utf-8") as f:
                         f.write(header + "\n")
                         for sec, s2, e2 in section_blocks:
-                            f.write(f"#SECTION {sec} {s2} {e2}\n")
+                            f.write(f"#SECTION {sec} {s2+1} {e2+1}\n")
                         for ln in old_lines:
+                            if ln.startswith("MAIN|") and play_lines:
+                                f.write("#PLAY\n")
+                                for pl in play_lines:
+                                    f.write(pl + "\n")
+                                f.write("#ENDPLAY\n\n")
                             f.write(ln + "\n")
 
                 except Exception:
@@ -1432,9 +1588,9 @@ def main_curses(stdscr):
                     pass
 
                 if had_adp:
-                    msg = f"Saved {t} (ADP → ADT in ARR)"
+                    msg = f"Saved {os.path.basename(path)} (ADP → ADT in ARR)"
                 else:
-                    msg = f"Saved {t}"
+                    msg = f"Saved {os.path.basename(path)}"
             except Exception as e:
                 msg = str(e)
             continue
@@ -1575,7 +1731,36 @@ def main_curses(stdscr):
                 msg = f"Pasted {len(entries_to_paste)} step(s) from {label}"
                 continue
 
-            # 체인 키 기본 처리 (이동, 한 줄 단위 삭제/반복, O/o 등)
+            
+            # 5) r / R: Remove section label at cursor (rename via remove + re-add with 's')
+            if ch in (ord("r"), ord("R")) and chain:
+                sec_name = None
+                if 0 <= chain_selected_idx < len(chain):
+                    sec_name = getattr(chain[chain_selected_idx], "section", None)
+                if not sec_name:
+                    dialog_alert(stdscr, "No section", "No section at current position.")
+                    continue
+                if not dialog_confirm(stdscr, "Remove section", f"Remove section '{sec_name}'?"):
+                    continue
+
+                r = _get_section_range(section_mgr, sec_name)
+                push_undo()
+                if r:
+                    s0, e0 = r
+                    s0 = max(0, s0)
+                    e0 = min(len(chain) - 1, e0)
+                    for i in range(s0, e0 + 1):
+                        try:
+                            if getattr(chain[i], "section", None) == sec_name:
+                                chain[i].section = None
+                        except Exception:
+                            pass
+                _remove_section(section_mgr, sec_name)
+                modified = True
+                msg = f"Section '{sec_name}' removed"
+                show_message(stdscr, msg)
+                continue
+# 체인 키 기본 처리 (이동, 한 줄 단위 삭제/반복, O/o 등)
             chain_selected_idx, changed = handle_chain_keys(
                 ch,
                 chain,
@@ -1586,44 +1771,44 @@ def main_curses(stdscr):
                 selected_idx,
                 push_undo,
             )
+            
             if ch == ord("s"):
                 rng = selection.get_range()
                 if rng:
                     start, end = rng
-                    name = dialog_input(stdscr, "Section name:", default_text="", maxlen=24)
-                    if name is None:
-                        show_message(stdscr, "Section naming canceled.")
-                        selection.reset()
-                        continue
+                    while True:
+                        name = _prompt_section_name_with_list(stdscr, section_mgr, title="Section name (no spaces):")
+                        if name is None:
+                            show_message(stdscr, "Section naming canceled.")
+                            selection.reset()
+                            break
+                        name = name.strip()
+                        if not name:
+                            dialog_alert(stdscr, "Invalid name", "Section name is empty.")
+                            continue
+                        if re.search(r"\s", name):
+                            dialog_alert(stdscr, "Invalid name", "Whitespace is not allowed in section names.")
+                            continue
+                        if name in _list_section_names(section_mgr):
+                            dialog_alert(stdscr, "Duplicate name", "Section name already exists. Choose a different name.")
+                            continue
 
-                    name = name.strip()
-                    if not name:
-                        show_message(stdscr, "Section name is empty.")
-                        selection.reset()
-                        continue
+                        push_undo()
+                        ok = section_mgr.add_section(name, start, end)
+                        if not ok:
+                            dialog_alert(stdscr, "Section overlap", "Section overlap error.")
+                            continue
 
-                    push_undo()
-                    ok = section_mgr.add_section(name, start, end)
-
-                    if not ok:
-                        suffix = 2
-                        while not ok and suffix < 100:
-                            alt = f"{name}_{suffix}"
-                            ok = section_mgr.add_section(alt, start, end)
-                            if ok:
-                                name = alt
-                                break
-                            suffix += 1
-
-                    if ok:
                         for i in range(start, end + 1):
-                            chain[i].section = name
+                            try:
+                                chain[i].section = name
+                            except Exception:
+                                pass
                         modified = True
                         msg = f"Section '{name}' added"
-                    else:
-                        msg = "Section overlap error"
-                    show_message(stdscr, msg)
-                    selection.reset()
+                        show_message(stdscr, msg)
+                        selection.reset()
+                        break
             if ch not in (ord(" "),):
                 continue
 
