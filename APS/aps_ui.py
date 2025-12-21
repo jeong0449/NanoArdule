@@ -235,6 +235,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
 def draw_chain_view(
     win,
     chain: List[ChainEntry],
+    chain_len: int,
     focus_chain: bool,
     selected_idx: int,
     selection: ChainSelection,
@@ -255,9 +256,9 @@ def draw_chain_view(
 
     ci = countin_label or "None"
     if focus_chain:
-        title = f" ▶ Pattern Chain — APS v0.27+ [CI:{ci}] "
+        title = f" ▶ Pattern Chain (len={chain_len}) — APS v0.27+ [CI:{ci}] "
     else:
-        title = f"   Pattern Chain — APS v0.27+ [CI:{ci}] "
+        title = f"   Pattern Chain (len={chain_len}) — APS v0.27+ [CI:{ci}] "
 
     try:
         win.addstr(0, 2, title[:w - 4])

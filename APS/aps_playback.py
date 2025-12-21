@@ -134,7 +134,7 @@ def play_chain(
             entry = chain[i]
             from aps_ui import draw_chain_view  # local import to avoid cycle
             from aps_sections import ChainSelection, SectionManager
-            draw_chain_view(chain_win, chain, True, i, ChainSelection(), SectionManager(), "")
+            draw_chain_view(chain_win, chain, len(chain), True, i, ChainSelection(), SectionManager(), "")
             stdscr.refresh()
 
             path = os.path.join(root, entry.filename)
