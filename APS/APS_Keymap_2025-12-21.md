@@ -8,7 +8,7 @@ with a focus on **Chain Edit** and related workflows.
 ## Global Keys
 
 | Key | Action |
-|----|-------|
+|-----|--------|
 | `Q` | Quit APS |
 | `H` | Show help |
 | `Space` | Play / Stop |
@@ -26,7 +26,7 @@ Chain Edit is used to edit the linear, non-looping pattern timeline.
 ### Navigation
 
 | Key | Action |
-|----|-------|
+|-----|--------|
 | `↑ / ↓` | Move cursor |
 | `J / K` | Move cursor (vi-style) |
 | `Enter` | Confirm / apply |
@@ -37,7 +37,7 @@ Chain Edit is used to edit the linear, non-looping pattern timeline.
 ### Block Selection
 
 | Key | Action |
-|----|-------|
+|-----|--------|
 | `V` | Mark block start (set anchor) |
 | *(cursor movement)* | Extend block selection |
 
@@ -50,8 +50,7 @@ Chain Edit is used to edit the linear, non-looping pattern timeline.
 ### Block Editing (Chain Edit only)
 
 | Key | Action |
-
-|----|-------|
+|-----|--------|
 | `Y` | Yank (copy) selected block |
 | `X` | Cut selected block |
 | `P` | Paste block or section |
@@ -105,3 +104,19 @@ a preview area may show the full label below.
 ---
 
 _Last updated: APS v0.27_
+
+
+## List Focus–Specific Insert Keys
+
+When the **file list** has focus (Patterns or ARR):
+
+| Key | List Focus | Action |
+|----|------------|--------|
+| `Enter` | ARR list | Insert selected ARR **after** current chain cursor |
+| `O` / `o` | ARR list | Insert selected ARR **before** current chain cursor |
+| `Enter` | Patterns list | Insert selected pattern **after** cursor (or increase repeats) |
+| `O` / `o` | Patterns list | Insert selected pattern **before** cursor |
+
+Notes:
+- `O` / `o` always means **insert-before** relative to the current chain cursor.
+- Section split (`_L` / `_R`) and ARR section import (`i_` prefix) are applied automatically.
