@@ -267,7 +267,7 @@ def draw_chain_view(
 
     if not chain:
         try:
-            win.addstr(1, 2, "체인이 비어 있습니다.")
+            win.addstr(1, 2, "Chain is empty.")
         except curses.error:
             pass
         win.refresh()
