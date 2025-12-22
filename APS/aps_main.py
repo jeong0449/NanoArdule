@@ -232,6 +232,40 @@ def main_curses(stdscr):
     selection = ChainSelection()
     section_mgr = SectionManager()
 
+    def _sync_chain_section_labels_from_mgr():
+        """Synchronize per-entry section labels from SectionManager metadata.
+
+        The main chain view renders section names using ChainEntry.section.
+        Some operations (e.g., ARR import) update section_mgr metadata
+        (split/import/shift) without updating ChainEntry.section fields.
+        Call this after any metadata-only section changes.
+        """
+        # Clear existing labels
+        for e in chain:
+            e.section = None
+
+        secs = getattr(section_mgr, "sections", None) or {}
+        if not chain or not secs:
+            return
+
+        for name, rng in secs.items():
+            try:
+                s, t = rng
+            except Exception:
+                continue
+            try:
+                s = int(s)
+                t = int(t)
+            except Exception:
+                continue
+            s = max(0, s)
+            t = min(len(chain) - 1, t)
+            if s > t:
+                continue
+            for i in range(s, t + 1):
+                chain[i].section = name
+
+
     # --- Undo stack: (chain, chain_selected_idx, selection, section_mgr, bpm) ---
     undo_stack: List[
         tuple[List[ChainEntry], int, ChainSelection, SectionManager, int]
@@ -1316,6 +1350,56 @@ def main_curses(stdscr):
         if ch == curses.KEY_F1:
             show_help_curses(stdscr)
             continue
+            
+        # H/h: open the latest keymap markdown (APS_Keymap*.md)
+        if ch in (ord("H"), ord("h")):
+            try:
+                import glob
+
+                candidates = []
+                search_dirs = []
+
+                # Prefer the runtime root (used elsewhere), but also try the current
+                # working directory and the script directory.
+                try:
+                    if root:
+                        search_dirs.append(root)
+                except Exception:
+                    pass
+
+                search_dirs.append(os.getcwd())
+                search_dirs.append(os.path.dirname(__file__))
+                search_dirs.append(os.path.join(os.getcwd(), "docs"))
+
+                seen = set()
+                for d in search_dirs:
+                    try:
+                        d = os.path.abspath(d)
+                        if d in seen:
+                            continue
+                        seen.add(d)
+                        candidates.extend(glob.glob(os.path.join(d, "APS_Keymap*.md")))
+                    except Exception:
+                        pass
+
+                if not candidates:
+                    msg = (
+                        "No APS_Keymap*.md found. "
+                        "(searched: project root, cwd, script dir, ./docs)"
+                    )
+                    continue
+
+                candidates.sort(key=lambda p: os.path.getmtime(p))
+                path = candidates[-1]
+                fn = os.path.basename(path)
+
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read().splitlines()
+                show_text_viewer(content, title=f"Keymap: {fn}")
+            except Exception as e:
+                msg = f"Keymap open error: {e}"
+            continue
+
 
         # F2: Pat/ARR 리스트 토글 + 리프레시
         if ch == curses.KEY_F2:
@@ -1736,17 +1820,31 @@ def main_curses(stdscr):
                     )
 
                 push_undo()
+                
                 for i, e in enumerate(entries_to_paste):
                     chain.insert(insert_at + i, e)
-                section_mgr.shift_after_insert(
-                    insert_at, len(entries_to_paste)
-                )
+                section_mgr.split_for_insert(insert_at, len(entries_to_paste))
+                _sync_chain_section_labels_from_mgr()
                 chain_selected_idx = insert_at
+            
                 selection.reset()
                 msg = f"Pasted {len(entries_to_paste)} step(s) from {label}"
                 continue
 
-            # 체인 키 기본 처리 (이동, 한 줄 단위 삭제/반복, O/o 등)
+                        # R/r: remove the section at the current cursor (chain focus only)
+            # - This restores the previous behavior that was shadowed by repeat_mode toggle.
+            if ch in (ord("r"), ord("R")) and chain:
+                cur = chain_selected_idx
+                if 0 <= cur < len(chain):
+                    sec = getattr(chain[cur], "section", None)
+                    if sec:
+                        push_undo()
+                        section_mgr.remove_section(sec)
+                        _sync_chain_section_labels_from_mgr()
+                        msg = f"Section '{sec}' removed"
+                continue
+
+# 체인 키 기본 처리 (이동, 한 줄 단위 삭제/반복, O/o 등)
             chain_selected_idx, changed = handle_chain_keys(
                 ch,
                 chain,
@@ -1948,8 +2046,10 @@ def main_curses(stdscr):
                                 chain_selected_idx = insert_at
                             else:
                                 chain.insert(insert_at, ChainEntry(fn, 1))
-                                section_mgr.shift_after_insert(insert_at, 1)
+                                section_mgr.split_for_insert(insert_at, 1)
+                                _sync_chain_section_labels_from_mgr()
                                 chain_selected_idx = insert_at
+
             else:
                 if arr_files:
                     arr_name = arr_files[selected_idx]
@@ -1957,7 +2057,13 @@ def main_curses(stdscr):
                     try:
                         load_countin_from_arr(arr_path)
                         parsed = parse_arr(arr_path)
-                        if isinstance(parsed, tuple) and len(parsed) >= 2:
+
+                        # Backward compatible: parse_arr may return (chain, bpm)
+                        # or (chain, bpm, sections).
+                        arr_sections = {}
+                        if isinstance(parsed, tuple) and len(parsed) >= 3:
+                            arr_chain, _arr_bpm, arr_sections = parsed[0], parsed[1], (parsed[2] or {})
+                        elif isinstance(parsed, tuple) and len(parsed) >= 2:
                             arr_chain, _arr_bpm = parsed[0], parsed[1]
                         else:
                             arr_chain, _arr_bpm = parsed, None
@@ -1973,6 +2079,9 @@ def main_curses(stdscr):
                             if not chain:
                                 chain = block
                                 chain_selected_idx = 0
+                                # Apply imported ARR sections for a fresh chain
+                                section_mgr.import_sections_from_source(arr_sections, 0, prefix="i_")
+                                _sync_chain_section_labels_from_mgr()
                             else:
                                 if (
                                     chain_selected_idx < 0
@@ -1982,9 +2091,11 @@ def main_curses(stdscr):
                                 insert_at = chain_selected_idx + 1
                                 for i, e in enumerate(block):
                                     chain.insert(insert_at + i, e)
-                                section_mgr.shift_after_insert(
-                                    insert_at, len(block)
-                                )
+                                section_mgr.split_for_insert(insert_at, len(block))
+
+                                section_mgr.import_sections_from_source(arr_sections, insert_at, prefix="i_")
+
+                                _sync_chain_section_labels_from_mgr()
                                 chain_selected_idx = insert_at
                             msg = f"Inserted ARR '{arr_name}' ({len(block)} steps)"
                     except Exception as e:
@@ -1992,10 +2103,10 @@ def main_curses(stdscr):
             continue
 
         # Shift+O
-        # Insert BEFORE current chain position:
-        #   - PAT list mode: insert pattern before cursor (existing behavior)
-        #   - ARR list mode: insert ARR block before cursor (mirror of Enter=after)
-        if ch in (ord("O"), ord("o")):
+        # O/o: insert BEFORE the current chain cursor (patterns/ARR list)
+        # - Patterns list: insert selected pattern before cursor (or merge repeats when adjacent)
+        # - ARR list: insert selected ARR block before cursor (and apply ARR sections with prefix)
+        if ch in (ord("O"), ord("o")) and focus == "patterns":
             if list_mode == "patterns":
                 if pattern_files:
                     push_undo()
@@ -2021,18 +2132,24 @@ def main_curses(stdscr):
                                 chain_selected_idx = insert_at - 1
                             else:
                                 chain.insert(insert_at, ChainEntry(fn, 1))
-                                section_mgr.shift_after_insert(insert_at, 1)
+                                section_mgr.split_for_insert(insert_at, 1)
+                                _sync_chain_section_labels_from_mgr()
                                 chain_selected_idx = insert_at
-                continue
 
-            if list_mode == "arr":
+            else:  # list_mode == "arr"
                 if arr_files:
                     arr_name = arr_files[selected_idx]
                     arr_path = os.path.join(root, arr_name)
                     try:
                         load_countin_from_arr(arr_path)
                         parsed = parse_arr(arr_path)
-                        if isinstance(parsed, tuple) and len(parsed) >= 2:
+
+                        # Backward compatible: parse_arr may return (chain, bpm)
+                        # or (chain, bpm, sections).
+                        arr_sections = {}
+                        if isinstance(parsed, tuple) and len(parsed) >= 3:
+                            arr_chain, _arr_bpm, arr_sections = parsed[0], parsed[1], (parsed[2] or {})
+                        elif isinstance(parsed, tuple) and len(parsed) >= 2:
                             arr_chain, _arr_bpm = parsed[0], parsed[1]
                         else:
                             arr_chain, _arr_bpm = parsed, None
@@ -2046,22 +2163,31 @@ def main_curses(stdscr):
                             if not chain:
                                 chain = block
                                 chain_selected_idx = 0
+                                # Apply imported ARR sections for a fresh chain
+                                section_mgr.import_sections_from_source(arr_sections, 0, prefix="i_")
+                                _sync_chain_section_labels_from_mgr()
                             else:
-                                if chain_selected_idx < 0 or chain_selected_idx >= len(chain):
+                                if (
+                                    chain_selected_idx < 0
+                                    or chain_selected_idx >= len(chain)
+                                ):
                                     chain_selected_idx = len(chain) - 1
 
-                                insert_at = chain_selected_idx  # BEFORE current position
+                                insert_at = chain_selected_idx
                                 for i, e in enumerate(block):
                                     chain.insert(insert_at + i, e)
-                                section_mgr.shift_after_insert(insert_at, len(block))
+
+                                section_mgr.split_for_insert(insert_at, len(block))
+                                section_mgr.import_sections_from_source(arr_sections, insert_at, prefix="i_")
+                                _sync_chain_section_labels_from_mgr()
                                 chain_selected_idx = insert_at
 
                             msg = f"Inserted ARR '{arr_name}' ({len(block)} steps)"
                     except Exception as e:
                         msg = f"ARR insert error: {e}"
-                continue
+            continue
 
-# Space: play
+        # Space: play
         if ch == ord(" "):
             if focus == "patterns":
                 if loaded_pattern and midi_port:
@@ -2246,8 +2372,7 @@ def main_curses(stdscr):
 
             mode = "VIEW"
             continue
-
-        if ch in (ord("r"), ord("R")):
+        if ch in (ord("r"), ord("R")) and focus != "chain":
             repeat_mode = not repeat_mode
             continue
 

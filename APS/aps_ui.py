@@ -19,12 +19,12 @@ from typing import List, Optional, Tuple
 
 from aps_core import Pattern, ChainEntry, compute_timing, describe_timing, HIT_CHAR
 from aps_sections import ChainSelection, SectionManager
-from aps_countin import get_countin_presets   # (헬프, Count-in 메뉴 안내용)
+from aps_countin import get_countin_presets   # (for Help / Count-in menu guidance)
 
 
 def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pairs):
     """
-    패턴 그리드 프리뷰.
+    Pattern grid preview.
     """
     win.erase()
     h, w = win.getmaxyx()
@@ -44,11 +44,11 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
     except curses.error:
         pass
 
-    # --- 레이아웃 설정 ---
+    # --- Layout settings ---
     label_w = 4  # 왼쪽 KK/SN 같은 약자 자리
     inner_w = w - 2
 
-    # 오른쪽 악기 설명 텍스트 ("KK: KICK" 형식)
+    # Right-side instrument description texts (format: "KK: KICK")
     instr_texts = [
         f"{abbr}: {name}"
         for abbr, name in zip(pattern.slot_abbr, pattern.slot_name)
@@ -59,27 +59,27 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
         max_instr_len = 0
     instr_w = min(max_instr_len + 1, max(10, inner_w // 3))  # 최소 10, 최대 1/3 정도
 
-    # 그리드가 쓸 수 있는 최대 x 좌표
+    # Max X coordinate available for the grid area
     grid_max_x = w - 1 - instr_w - 1  # 오른쪽 테두리 - 악기컬럼 - 1칸 여유
     if grid_max_x <= label_w + 1:
-        # 너무 좁으면 악기 컬럼 포기하고 그리드만
+        # If too narrow, drop the instrument column and draw only the grid
         grid_max_x = w - 2
         instr_w = 0
 
-    # 타이밍 정보
+    # Timing info
     beats, bars, spb, spbar = compute_timing(pattern)
 
-    # KK가 아래로 오도록 slot을 뒤집어서 사용
+    # Reverse slot order so KK appears at the bottom
     slots = list(range(pattern.slots - 1, -1, -1))
 
-    # --- 그리드 + 오른쪽 악기 설명 ---
+    # --- Grid + right-side instrument descriptions ---
     for row_idx, s in enumerate(slots):
         y = 1 + row_idx
-        # 맨 아래 한 줄은 legend 용으로 남겨둠
+        # Reserve the very last row for the legend
         if y >= h - 2:
             break
 
-        # 슬롯 라벨 (약자)
+        # Slot label (abbreviation)
         label = pattern.slot_abbr[s]
         try:
             win.addstr(y, 1, f"{label:>3} ")
@@ -88,7 +88,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
 
         grid_start_x = 1 + label_w
 
-        # step → visual_step(=bar 사이에 공백 1칸 삽입) 변환
+        # Convert step -> visual_step (insert one blank column between bars)
         for step in range(pattern.length):
             if spbar > 0:
                 visual_step = step + (step // spbar)
@@ -105,7 +105,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
             ch = HIT_CHAR
 
             if current_step is not None and current_step == step:
-                # 현재 재생 스텝: 색은 play, no-hit면 '|'로 표시
+                # Current playing step: use 'play' color; show '|' when no-hit
                 ch = HIT_CHAR if acc > 0 else "|"
                 if use_color:
                     try:
@@ -114,7 +114,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
                         pass
             else:
                 if acc == 0:
-                    # no-hit 점: beat 단위로 색 번갈아
+                    # No-hit dot: alternate color per beat
                     ch = "·"
                     if use_color:
                         if spb > 0 and beats > 0:
@@ -127,7 +127,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
                         except Exception:
                             pass
                 else:
-                    # 악센트 히트
+                    # Accented hit
                     if acc == 1:
                         key = "acc1"
                     elif acc == 2:
@@ -145,7 +145,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
             except curses.error:
                 pass
 
-        # 오른쪽 악기 설명 컬럼 (KK: KICK)
+        # Right-side instrument column (KK: KICK)
         if instr_w > 0:
             instr_x = grid_max_x + 1  # 그리드 끝 + 1칸
             text = f"{pattern.slot_abbr[s]}: {pattern.slot_name[s]}"
@@ -154,7 +154,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
             except curses.error:
                 pass
 
-    # --- 아래쪽 한 줄: no-hit + 액센트 legend ---
+    # --- Bottom row: no-hit + accent legend ---
     legend_y = h - 2
     try:
         win.hline(legend_y, 1, " ", w - 2)
@@ -168,7 +168,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
         pass
     x += len("Legend: ")
 
-    # even-beat no-hit (white)
+    # Even-beat no-hit (white)
     if use_color:
         try:
             win.addch(legend_y, x, "·", curses.color_pair(color_pairs.get("n", 0)))
@@ -186,7 +186,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
         pass
     x += len("even  ")
 
-    # odd-beat no-hit (cyan)
+    # Odd-beat no-hit (cyan)
     if use_color:
         try:
             win.addch(legend_y, x, "·", curses.color_pair(color_pairs.get("n2", 0)))
@@ -243,12 +243,12 @@ def draw_chain_view(
     countin_label: str,
 ):
     """
-    체인 뷰:
-    - sel_range: 블록 선택 영역(항상 반전)
-    - selected_idx: 현재 삽입 위치(포커스가 없어도 항상 표시)
-    - 포커스 창은 제목 앞에 ▶ 표시, 선택 줄은 역상+굵게
-    - 비포커스 창은 제목에 공백, 선택 줄은 노란색 굵게
-    - countin_label: 현재 선택된 Count-in 상태 (예: None, SimpleHH...)
+    Chain view:
+    - sel_range: block selection range (always reversed)
+    - selected_idx: current insertion cursor (always shown even without focus)
+    - Focused window shows ▶ before the title; selected line is reverse+bold
+    - Unfocused window has a leading space in title; selected line is yellow+bold
+    - countin_label: currently selected Count-in state (e.g., None, SimpleHH...)
     """
     win.erase()
     h, w = win.getmaxyx()
@@ -287,21 +287,21 @@ def draw_chain_view(
         line = f"{row + 1:02d}: {label}{entry.filename} x{entry.repeats}"
 
         if sel_range and sel_range[0] <= row <= sel_range[1]:
-            # 블록 선택: 항상 반전
+            # Block selection: always reversed
             try:
                 win.addstr(y, 1, line[:w - 2].ljust(w - 2), curses.A_REVERSE)
             except curses.error:
                 pass
         elif row == selected_idx:
-            # 현재 하이라이트 위치: 포커스 여부와 상관없이 항상 표시
+            # Highlighted cursor: always shown regardless of focus
             if focus_chain:
-                # 체인 창에 포커스: 역상 + 굵게
+                # Chain window focused: reverse + bold
                 attr = curses.A_REVERSE | curses.A_BOLD
             else:
-                # 비포커스: 노란색 굵게 (색 없으면 그냥 굵게)
+                # Unfocused: yellow + bold (or just bold if color unavailable)
                 attr = curses.A_BOLD
                 try:
-                    attr |= curses.color_pair(10)  # 10번 페어: 노랑 (main에서 초기화)
+                    attr |= curses.color_pair(10)  # Pair 10: yellow (initialized in main)
                 except curses.error:
                     pass
             try:
@@ -332,8 +332,8 @@ def draw_status(stdscr, midi_port, bpm, mode, msg, repeat_mode):
 
 def draw_menu(stdscr):
     """
-    상단 메뉴바 표시.
-    F-key 매핑 (v0.27 최신):
+    Draw the top menu bar.
+    F-key mapping (latest for v0.27):
 
     F1: Help
     F2: Pat/ARR
@@ -486,7 +486,7 @@ def prompt_text(stdscr, prompt: str, maxlen: int = 40) -> Optional[str]:
         win.erase()
         win.box()
         try:
-            # Prompt + 현재 입력 내용
+            # Prompt + current input text
             display = f"{prompt} {text}"
             win.addstr(1, 2, display[: win_w - 4])
         except curses.error:
@@ -578,14 +578,14 @@ def choose_midi_port_curses(stdscr) -> Optional[str]:
             return None
 
 
-# ======== 섹션 오버뷰 / 블록/섹션 선택 / 붙여넣기 위치 선택 / Count-in 선택 / 헬프 ========
+# ======== Section overview / choose block+section / paste position / choose count-in / help ========
 
 def show_section_overview_curses(
     stdscr, chain: List[ChainEntry], section_mgr: SectionManager, current_idx: int
 ):
     """
-    SectionManager에 등록된 섹션들을 한눈에 보여주는 창.
-    (섹션 이름 + row 범위 + 길이)
+    Popup window that shows all sections registered in SectionManager.
+    (section name + row range + length)
     """
     max_y, max_x = stdscr.getmaxyx()
     lines: List[str] = []
@@ -644,9 +644,9 @@ def choose_block_or_section_curses(
     chain: List[ChainEntry],
 ) -> Optional[Tuple[List[ChainEntry], str]]:
     """
-    붙여넣기 시 호출: 현재 클립보드와 정의된 섹션들 중에서
-    어떤 블록을 붙여넣을지 선택.
-    반환값: (entries_to_paste, label) 또는 None
+    Called on paste: choose what to paste from the clipboard or defined sections.
+    Select which block to paste.
+    Returns: (entries_to_paste, label) or None
     """
     items: List[Tuple[str, List[ChainEntry]]] = []
 
@@ -726,8 +726,8 @@ def choose_block_or_section_curses(
 
 def choose_paste_position_curses(stdscr) -> Optional[str]:
     """
-    붙여넣기 후, 선택된 블록을 현재 라인의 '위' 또는 '아래'에 붙일지 선택.
-    반환값: "before" / "after" / None
+    After paste, choose whether to paste the selected block before or after the current line.
+    Returns: "before" / "after" / None
     """
     max_y, max_x = stdscr.getmaxyx()
     options = ["After current line", "Before current line"]
@@ -785,10 +785,10 @@ def choose_paste_position_curses(stdscr) -> Optional[str]:
 
 def choose_countin_curses(stdscr, current_idx: int) -> Optional[int]:
     """
-    F3: Count-in preset 선택 창.
-    - 첫 줄은 (None)
-    - 이후는 aps_countin.py 안에 정의된 내장 패턴 이름들
-    반환값: -1 = None, 0..N-1 = 선택된 preset index, None = 취소
+    F3: Count-in preset selection popup.
+    - First row is (None)
+    - The rest are builtin pattern names defined in aps_countin.py
+    Returns: -1 = None, 0..N-1 = selected preset index, None = canceled
     """
     presets = get_countin_presets()
     names = [p.name for p in presets]
@@ -832,7 +832,7 @@ def choose_countin_curses(stdscr, current_idx: int) -> Optional[int]:
                 except curses.error:
                     pass
 
-        # 맨 아랫줄: 이 데이터가 어느 스크립트 파일에 있는지 표시
+        # Bottom line: show where these builtin patterns are defined
         info = "Builtin patterns are in aps_countin.py"
         try:
             win.addstr(h - 2, 2, info[: w - 4])
@@ -847,24 +847,25 @@ def choose_countin_curses(stdscr, current_idx: int) -> Optional[int]:
         elif ch in (curses.KEY_DOWN, ord("j")):
             idx = (idx + 1) % len(items)
         elif ch in (10, 13):
-            # 선택 확정
+            # Confirm selection
             if idx == 0:
                 return -1   # None
             else:
                 return idx - 1
         elif ch in (27, ord("q")):
-            # 취소
+            # Cancel
             return None
 
 
 def show_help_curses(stdscr):
     """
-    편집용 키 요약을 보여주는 헬프 창 (F1).
+    Help popup showing a quick key summary (F1).
     """
     lines = [
         "APS Chain Editor Keys",
         "",
         "[Focus]",
+        "  H               : open full keymap (APS_Keymap*.md)",
         "  Tab              : switch focus (Patterns/ARR <-> Chain)",
         "",
         "[Left list (Patterns / ARR)]",
@@ -873,12 +874,13 @@ def show_help_curses(stdscr):
         "  (Patterns mode)",
         "    Arrow / hjkl   : move selection",
         "    Enter          : add pattern after cursor (merges xN when same)",
-        "    O              : add pattern before cursor (merges xN when same)",
+        "    O / o          : add pattern before cursor (merges xN when same)",
         "    c              : toggle _P### <-> _B### of selected pattern file",
         "",
         "  (ARR mode)",
         "    Arrow / hjkl   : move selection",
-        "    Enter          : expand selected ARR into chain (as plain steps)",
+        "    Enter          : insert selected ARR after chain cursor",
+        "    O / o          : insert selected ARR before chain cursor",
         "",
         "[Chain basic]",
         "  ↑/↓/PgUp/PgDn/Home/End : move in chain",
@@ -910,7 +912,8 @@ def show_help_curses(stdscr):
         "",
         "[Playback / Misc]",
         "  Space          : play pattern (left) or chain (right)",
-        "  r              : toggle repeat (pattern playback only)",
+        "  r              : toggle repeat (non-Chain focus)",
+        "  R (Chain focus) : remove section at cursor",
         "  F5             : pattern info (current preview pattern)",
         "  F6             : choose MIDI out",
         "  F9             : set BPM",

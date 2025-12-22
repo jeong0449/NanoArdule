@@ -59,25 +59,47 @@ def save_arr(path: str, chain: List[ChainEntry], bpm: int) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
-
-def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int]]:
+def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
     """
-    ARR 파일을 읽어 체인과 BPM을 복원한다.
-    - 반환값: (chain, bpm)
-      bpm 라인이 없으면 bpm은 None
+    Parse an ARR file and restore its chain, BPM, and section metadata.
+
+    Returns:
+        (chain, bpm, sections)
+
+        - chain: List[ChainEntry]
+        - bpm: Optional[int] (None if BPM is not defined)
+        - sections: Dict[str, Tuple[int, int]]
+            Section name mapped to (start, end) indices
     """
     with open(path, "r", encoding="utf-8") as f:
         raw_lines = f.readlines()
 
+    # Strip whitespace and ignore empty lines
     lines = [ln.strip() for ln in raw_lines if ln.strip()]
 
     bpm: Optional[int] = None
     pool_map: dict[int, str] = {}
     main_spec: Optional[str] = None
+    sections: dict[str, tuple[int, int]] = {}
 
     for ln in lines:
+        # Section definition: "#SECTION <name> <start> <end>"
+        # Must be handled before generic '#' comments
+        if ln.startswith("#SECTION"):
+            parts = ln.split()
+            if len(parts) >= 4:
+                _, name, s, e = parts[:4]
+                try:
+                    sections[name] = (int(s), int(e))
+                except ValueError:
+                    pass
+            continue
+
+        # Ignore other comment lines
         if ln.startswith("#"):
             continue
+
+        # BPM definition: "BPM=<value>"
         if ln.upper().startswith("BPM="):
             try:
                 bpm = int(ln.split("=", 1)[1])
@@ -85,11 +107,12 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int]]:
                 bpm = None
             continue
 
+        # MAIN chain specification: "MAIN|..."
         if ln.upper().startswith("MAIN|"):
             main_spec = ln.split("|", 1)[1].strip()
             continue
 
-        # POOL 라인: "숫자=파일명"
+        # Pool entry: "<number>=<filename>"
         if "=" in ln and ln.split("=", 1)[0].isdigit():
             idx_str, fn = ln.split("=", 1)
             try:
@@ -100,10 +123,11 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int]]:
 
     chain: List[ChainEntry] = []
 
+    # Build the main chain from MAIN specification
     if main_spec:
         parts = [p.strip() for p in main_spec.split(",") if p.strip()]
         for p in parts:
-            # "3x4" 또는 "3" 형태
+            # Format: "3x4" (index x repeats) or "3" (single repeat)
             if "x" in p:
                 idx_str, rep_str = p.split("x", 1)
                 try:
@@ -121,6 +145,8 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int]]:
             fn = pool_map.get(idx)
             if not fn:
                 continue
+
             chain.append(ChainEntry(fn, rep))
 
-    return chain, bpm
+    return chain, bpm, sections
+
