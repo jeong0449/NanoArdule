@@ -433,20 +433,30 @@ def main_curses(stdscr):
         if not composite_mode or composite_pattern is None:
             msg = "합성 패턴이 없습니다."
             return
+#여기부터
+        default_base = f"HYB_P{hyb_next_index:03d}"
 
-        default_name = f"HYB_P{hyb_next_index:03d}.APT"
-        t = prompt_text(stdscr, f"Save hybrid pattern [{default_name}]:")
-        if t is None:
+        base = dialog_input(
+            stdscr,
+            "Save hybrid pattern:",
+            default_text=default_base,
+            maxlen=64,
+            suffix=".APT",
+        )
+
+        if base is None:
             msg = "Save canceled."
             return
-        if not t:
-            t = default_name
-        # 확장자 없으면 .APT 붙이기
-        if "." not in t:
-            t += ".APT"
 
+        base = base.strip()
+        if not base:
+            base = default_base
+
+        t = base + ".APT"
         path = os.path.join(root, t)
 
+
+# 여기까지 
         try:
             p = composite_pattern
             data = {
@@ -1606,6 +1616,7 @@ def main_curses(stdscr):
                     pass
                 msg = "Chain is empty."
                 continue
+
             ok = dialog_confirm(
                 stdscr,
                 "Save ARR file?",
@@ -1616,40 +1627,66 @@ def main_curses(stdscr):
             if not ok:
                 msg = "Save canceled."
                 continue
-                
-            base = dialog_input(stdscr, "ARR filename:", default_text="", maxlen=64, suffix=".ARR")
+
+            # ARR filename: re-prompt if empty or already exists
+            base = None
+            while True:
+                base = dialog_input(
+                    stdscr,
+                    "ARR filename:",
+                    default_text="",
+                    maxlen=64,
+                    suffix=".ARR",
+                )
+                if base is None:
+                    msg = "Save canceled."
+                    break
+
+                base = base.strip()
+                if not base:
+                    try:
+                        dialog_alert(stdscr, "Filename is empty.")
+                    except Exception:
+                        pass
+                    continue
+
+                arr_filename = base + ".ARR"
+                path = os.path.join(root, arr_filename)
+
+                if os.path.exists(path):
+                    try:
+                        dialog_alert(
+                            stdscr,
+                            f"File already exists:\n{arr_filename}\n\nPlease enter a different name.",
+                        )
+                    except Exception:
+                        pass
+                    continue
+
+                # OK
+                break
+
             if base is None:
-                msg = "Save canceled."
+                # canceled
                 continue
 
-            if not base:
-                msg = "Filename is empty."
-                continue
-
-            arr_filename = base + ".ARR"
-
-            path = os.path.join(root, arr_filename)
             try:
                 # ADP → ADT 변환을 반영한 복사본을 만들어 저장
-                chain_for_save = [
-                    ChainEntry(e.filename, e.repeats) for e in chain
-                ]
+                chain_for_save = [ChainEntry(e.filename, e.repeats) for e in chain]
                 had_adp = False
                 for e in chain_for_save:
                     if e.filename.lower().endswith(".adp"):
                         had_adp = True
-                        base, _ext = os.path.splitext(e.filename)
-                        e.filename = base + ".ADT"
+                        b0, _ext0 = os.path.splitext(e.filename)
+                        e.filename = b0 + ".ADT"
 
                 # 1차로 기본 ARR를 저장
                 save_arr(path, chain_for_save, bpm)
 
-                # 그 뒤에 #COUNTIN 헤더를 삽입하여 카운트-인 상태 기록
+                # 그 뒤에 #COUNTIN / #SECTION 헤더를 삽입하여 상태 기록
                 try:
                     old_lines: List[str] = []
-                    with open(
-                        path, "r", encoding="utf-8", errors="ignore"
-                    ) as f:
+                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
                         for line in f:
                             if line.startswith("#COUNTIN") or line.startswith("#SECTION"):
                                 continue
@@ -1681,19 +1718,17 @@ def main_curses(stdscr):
                             f.write(f"#SECTION {sec} {s2} {e2}\n")
                         for ln in old_lines:
                             f.write(ln + "\n")
-
                 except Exception:
                     # 헤더 추가 실패해도 기본 ARR는 살아 있으므로 조용히 무시
                     pass
 
                 if had_adp:
-                    msg = f"Saved {t} (ADP → ADT in ARR)"
+                    msg = f"Saved {arr_filename} (ADP → ADT in ARR)"
                 else:
-                    msg = f"Saved {t}"
+                    msg = f"Saved {arr_filename}"
             except Exception as e:
                 msg = str(e)
             continue
-
         # F8: Count-in 선택
         if ch == curses.KEY_F8:
             new_idx = choose_countin_curses(stdscr, countin_idx)
