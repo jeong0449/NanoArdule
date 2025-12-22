@@ -1992,36 +1992,76 @@ def main_curses(stdscr):
             continue
 
         # Shift+O
-        if ch == ord("O") and list_mode == "patterns":
-            if pattern_files:
-                push_undo()
-                fn = pattern_files[selected_idx]
-                if not chain:
-                    chain.append(ChainEntry(fn, 1))
-                    chain_selected_idx = 0
-                else:
-                    if chain_selected_idx < 0 or chain_selected_idx >= len(chain):
-                        chain_selected_idx = len(chain) - 1
-
-                    cur = chain[chain_selected_idx]
-
-                    if cur.filename == fn:
-                        cur.repeats += 1
+        # Insert BEFORE current chain position:
+        #   - PAT list mode: insert pattern before cursor (existing behavior)
+        #   - ARR list mode: insert ARR block before cursor (mirror of Enter=after)
+        if ch in (ord("O"), ord("o")):
+            if list_mode == "patterns":
+                if pattern_files:
+                    push_undo()
+                    fn = pattern_files[selected_idx]
+                    if not chain:
+                        chain.append(ChainEntry(fn, 1))
+                        chain_selected_idx = 0
                     else:
-                        insert_at = chain_selected_idx
-                        if (
-                            insert_at > 0
-                            and chain[insert_at - 1].filename == fn
-                        ):
-                            chain[insert_at - 1].repeats += 1
-                            chain_selected_idx = insert_at - 1
-                        else:
-                            chain.insert(insert_at, ChainEntry(fn, 1))
-                            section_mgr.shift_after_insert(insert_at, 1)
-                            chain_selected_idx = insert_at
-            continue
+                        if chain_selected_idx < 0 or chain_selected_idx >= len(chain):
+                            chain_selected_idx = len(chain) - 1
 
-        # Space: play
+                        cur = chain[chain_selected_idx]
+
+                        if cur.filename == fn:
+                            cur.repeats += 1
+                        else:
+                            insert_at = chain_selected_idx
+                            if (
+                                insert_at > 0
+                                and chain[insert_at - 1].filename == fn
+                            ):
+                                chain[insert_at - 1].repeats += 1
+                                chain_selected_idx = insert_at - 1
+                            else:
+                                chain.insert(insert_at, ChainEntry(fn, 1))
+                                section_mgr.shift_after_insert(insert_at, 1)
+                                chain_selected_idx = insert_at
+                continue
+
+            if list_mode == "arr":
+                if arr_files:
+                    arr_name = arr_files[selected_idx]
+                    arr_path = os.path.join(root, arr_name)
+                    try:
+                        load_countin_from_arr(arr_path)
+                        parsed = parse_arr(arr_path)
+                        if isinstance(parsed, tuple) and len(parsed) >= 2:
+                            arr_chain, _arr_bpm = parsed[0], parsed[1]
+                        else:
+                            arr_chain, _arr_bpm = parsed, None
+
+                        if not arr_chain:
+                            msg = "ARR is empty"
+                        else:
+                            push_undo()
+                            block = [ChainEntry(e.filename, e.repeats) for e in arr_chain]
+
+                            if not chain:
+                                chain = block
+                                chain_selected_idx = 0
+                            else:
+                                if chain_selected_idx < 0 or chain_selected_idx >= len(chain):
+                                    chain_selected_idx = len(chain) - 1
+
+                                insert_at = chain_selected_idx  # BEFORE current position
+                                for i, e in enumerate(block):
+                                    chain.insert(insert_at + i, e)
+                                section_mgr.shift_after_insert(insert_at, len(block))
+                                chain_selected_idx = insert_at
+
+                            msg = f"Inserted ARR '{arr_name}' ({len(block)} steps)"
+                    except Exception as e:
+                        msg = f"ARR insert error: {e}"
+                continue
+
+# Space: play
         if ch == ord(" "):
             if focus == "patterns":
                 if loaded_pattern and midi_port:
