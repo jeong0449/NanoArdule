@@ -15,6 +15,7 @@ with a focus on **Chain Edit** and related workflows.
 | `C` | Instant pattern copy (global) |
 | `S` | Enter Step Sequencer |
 | `B` | Build hybrid pattern |
+| `R` / `r` | Toggle repeat mode *(non-Chain focus only)* |
 
 ---
 
@@ -49,13 +50,19 @@ Chain Edit is used to edit the linear, non-looping pattern timeline.
 ### Block Editing (Chain Edit only)
 
 | Key | Action |
+
 |----|-------|
 | `Y` | Yank (copy) selected block |
 | `X` | Cut selected block |
 | `P` | Paste block or section |
 | `F` | Flush clipboard (clear) |
+| `R` / `r` | Remove section at cursor *(Chain focus only)* |
+
 
 Notes:
+- `R`/`r` is **focus-aware**:
+  - In **Chain focus**: removes the section at the current cursor line.
+  - Outside Chain focus: toggles **repeat mode**.
 - `Y` copies the selected block and clears the highlight.
 - `X` cuts the block and updates the chain immediately.
 - `P` opens a dialog to choose from:
