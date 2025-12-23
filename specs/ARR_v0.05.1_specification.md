@@ -119,8 +119,55 @@ Example:
 ```
 
 ---
+## 4. Pattern Pool (Required)
 
-## 4. MAIN Playback Line
+The Pattern Pool defines a mapping between numeric identifiers and pattern files
+used by the playback sequence.
+
+Each entry in the Pattern Pool associates a **1-based integer ID** with an
+ADT pattern file name.
+
+### 4.1 Syntax
+
+```
+N=FILENAME.ADT
+```
+
+- `N` is a positive integer starting from **1**
+- `FILENAME.ADT` is the name of a pattern file
+- File names are case-sensitive and must be valid ADT files
+
+### 4.2 Semantics
+
+- The Pattern Pool provides the reference table for numeric items appearing in
+  the `MAIN|...` playback line.
+- All numeric references in `MAIN|...` **MUST correspond to an existing
+  Pattern Pool entry**.
+- Pattern Pool indices are **1-based** and are intended for human readability.
+
+### 4.3 Ordering and Uniqueness
+
+- Pattern Pool entries SHOULD be contiguous, forming a sequence `1..K` without gaps.
+- Each numeric index MUST appear at most once.
+- Duplicate pattern file names MAY appear, but APS SHOULD generate a
+  de-duplicated pool where the first occurrence wins.
+
+### 4.4 Requiredness
+
+- If a `MAIN|...` playback line is present, the Pattern Pool section is **REQUIRED**.
+- An ARR file containing numeric playback references without a Pattern Pool
+  definition is considered **invalid**.
+
+### 4.5 Relation to Other Sections
+
+- Pattern Pool indices are independent of internal chain indices.
+- Section ranges defined by `#SECTION` refer to **positions within the
+  `MAIN|...` playback sequence**, not to Pattern Pool indices.
+
+
+---
+
+## 5. MAIN Playback Line
 
 ```
 MAIN|<item>,<item>,...
@@ -145,7 +192,7 @@ MAIN|1x2,2,3x4
 
 ---
 
-## 5. Section Semantics
+## 6. Section Semantics
 
 In ARR v0.05:
 
@@ -162,9 +209,9 @@ Sections exist to support:
 
 ---
 
-## 6. Editing and Saving Rules
+## 7. Editing and Saving Rules
 
-### 6.1 Saving
+### 7.1 Saving
 
 APS writes ARR files in the following order:
 
@@ -175,7 +222,7 @@ APS writes ARR files in the following order:
 
 ---
 
-## 7. Compatibility and Forward Strategy
+## 8. Compatibility and Forward Strategy
 
 ARR v0.05 is **not a DSL**.
 
@@ -189,7 +236,7 @@ These features are reserved for ARR v0.1 and later.
 
 ---
 
-## 8. Versioning Policy
+## 9. Versioning Policy
 
 - Files conforming to this document are considered **ARR v0.05**
 - APS may treat files without explicit version tags as v0.05-compatible
@@ -200,7 +247,7 @@ These features are reserved for ARR v0.1 and later.
 
 ---
 
-## 9. Summary
+## 10. Summary
 
 ARR v0.05 is a **pragmatic, editor-friendly chain format**:
 
