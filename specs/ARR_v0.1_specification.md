@@ -86,13 +86,13 @@ ARR allows explicit selection of which bar of a 2-bar pattern to use.
 
 Syntax:
 ```
-NAME@1   # first bar only
-NAME@2   # second bar only
+NAME@A   # first bar only
+NAME@B   # second bar only
 ```
 
 Rules:
-- `@1` selects the first bar
-- `@2` selects the second bar
+- `@A` selects the first bar
+- `@B` selects the second bar
 
 ---
 
