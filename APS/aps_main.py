@@ -84,7 +84,7 @@ from aps_core import (
     load_adt,
     load_adp,
     scan_patterns,
-    compute_timing,  # (현재 직접 쓰진 않지만 남겨둠)
+    compute_timing,  # (not used directly here, kept for reference)
 )
 from aps_sections import ChainSelection, SectionManager
 from aps_arr import save_arr, parse_arr
@@ -108,7 +108,7 @@ from aps_ui import (
 
 )
 from aps_chainedit import handle_chain_keys
-from aps_countin import get_countin_presets  # 내장 카운트-인 패턴들 (이름/메타 용)
+from aps_countin import get_countin_presets  # Built-in count-in patterns (for name/meta)
 
 try:
     import mido
@@ -122,8 +122,8 @@ _GLOBAL_STDSCR_FOR_DIALOGS = None
 
 def toggle_p_b(fname: str) -> Optional[str]:
     """
-    파일명 끝의 _P### / _B### 를 서로 토글.
-    예: SWG_P001.ADT -> SWG_B001.ADT
+    Toggle the filename suffix between _P### and _B###.
+    Example: SWG_P001.ADT -> SWG_B001.ADT
     """
     base, ext = os.path.splitext(fname)
     import re
@@ -140,11 +140,11 @@ def toggle_p_b(fname: str) -> Optional[str]:
 
 def find_gs():
     """
-    MIDI 출력 포트 자동 선택:
+    Auto-select a MIDI output port:
 
-    1) 이름에 'microsoft' 가 들어있지 않은 포트를 우선
-    2) 모두 Microsoft 계열이면 첫 번째 포트
-    3) 포트가 없으면 None
+    1) Prefer a port whose name does not include 'microsoft'
+    2) If all ports are Microsoft, use the first port
+    3) If there is no port, return None
     """
     if mido is None:
         return None
@@ -157,12 +157,12 @@ def find_gs():
     if not names:
         return None
 
-    # 'microsoft' 가 이름에 포함되지 않은 포트 우선 (대소문자 무시)
+    # Prefer ports whose name does not include 'microsoft' (case-insensitive).
     non_ms = [n for n in names if "microsoft" not in n.lower()]
     if non_ms:
         return non_ms[0]
 
-    # 모두 Microsoft 계열이면 첫 번째 포트 사용
+    # If all are Microsoft ports, use the first port
     return names[0]
 
 
@@ -173,9 +173,9 @@ def main_curses(stdscr):
     _GLOBAL_STDSCR_FOR_DIALOGS = stdscr
 
 
-    use_color = False    # 색상 사용 여부
+    use_color = False    # Whether to use color
     color_pairs = {}
-    highlight_unfocused_pair = 0  # 비포커스 하이라이트용 컬러 페어 번호
+    highlight_unfocused_pair = 0  # Color pair number for unfocused highlight
 
     def init_main_colors():
         nonlocal use_color, color_pairs, highlight_unfocused_pair
@@ -203,28 +203,28 @@ def main_curses(stdscr):
     init_main_colors()
 
 
-    # 패턴 루트 디렉터리:
-    #   - ./patterns 폴더가 있으면 그쪽을 우선 사용
-    #   - 없으면 현재 디렉터리(".") 사용
+    # Pattern root directory:
+    #   - If ./patterns exists, prefer that folder
+    #   - If missing, use the current directory (".")
     if os.path.isdir("patterns"):
         root = "patterns"
     else:
         root = "."
 
-    # 패턴 / ARR 리스트
+    # Pattern / ARR list
     pattern_files: List[str] = scan_patterns(root)
     arr_files: List[str] = sorted(
         f for f in os.listdir(root) if f.lower().endswith(".arr")
     )
 
-    # 왼쪽 리스트 모드: "patterns" / "arr"
+    # Left list mode: "patterns" / "arr"
     list_mode: str = "patterns"
 
     selected_idx = 0
     loaded_pattern: Optional[Pattern] = None
     chain: List[ChainEntry] = []
-    chain_selected_idx = 0  # 체인 커서 (삽입 기준)
-    focus = "patterns"  # "patterns" 또는 "chain"
+    chain_selected_idx = 0  # Chain cursor (insertion position)
+    focus = "patterns"  # "patterns" or "chain"
     bpm = 120
     repeat_mode = False
     msg = ""
@@ -271,21 +271,21 @@ def main_curses(stdscr):
         tuple[List[ChainEntry], int, ChainSelection, SectionManager, int]
     ] = []
 
-    # --- Clipboard (cut/copy한 블록) ---
+    # --- Clipboard (cut/copied block) ---
     clipboard: List[ChainEntry] = []
 
-    # --- Count-in 상태 ---
-    countin_idx: int = -1  # -1 = 없음, 0..N-1 = get_countin_presets() 인덱스
+    # --- Count-in state ---
+    countin_idx: int = -1  # -1 = none, 0..N-1 = index into get_countin_presets()
     countin_presets: List[Pattern] = get_countin_presets()
 
-    # --- Hybrid / Composite 상태 (A/B 소스, 합성 프리뷰, HYB_P9xx.APT 자동 번호) ---
-    bar_sources: List[int] = []          # A/B 소스로 선택된 패턴 인덱스들 (최대 2개)
-    composite_mode: bool = False         # True면 합성 프리뷰 모드
+    # --- Hybrid / Composite state (A/B sources, composite preview, HYB_P9xx.APT auto numbering) ---
+    bar_sources: List[int] = []          # Pattern indices selected as A/B sources (max 2)
+    composite_mode: bool = False         # True if in composite preview mode
     composite_swap: bool = False         # False: A1+B2, True: A2+B1
-    composite_pattern: Optional[Pattern] = None  # 현재 합성된 패턴
-    hyb_next_index: int = 901            # HYB_P9xx.APT 자동 증가 인덱스
+    composite_pattern: Optional[Pattern] = None  # Current composite pattern
+    hyb_next_index: int = 901            # Auto-increment index for HYB_P9xx.APT
 
-    # --- 왼쪽 리스트의 "첫 번째로 보이는 인덱스" (페이지 스크롤용) ---
+    # --- "First visible index" of the left list (for page scrolling) ---
     top_index = 0
 
     def get_countin_label() -> str:
@@ -296,7 +296,7 @@ def main_curses(stdscr):
         return "?"
 
     def push_undo():
-        # 깊은 복사로 현재 상태를 스택에 저장
+        # Save current state onto the stack with a deep copy
         snapshot = (
             copy.deepcopy(chain),
             chain_selected_idx,
@@ -305,7 +305,7 @@ def main_curses(stdscr):
             bpm,
         )
         undo_stack.append(snapshot)
-        # 너무 오래된 것은 버리기 (최근 100단계만 유지)
+        # Drop very old entries (keep only the most recent 100 steps)
         if len(undo_stack) > 100:
             undo_stack.pop(0)
 
@@ -313,7 +313,7 @@ def main_curses(stdscr):
         """현재 pattern_files / selected_idx 기반으로 프리뷰 로드 (list_mode=patterns일 때만 의미 있음)."""
         nonlocal loaded_pattern, msg
         if list_mode != "patterns":
-            # ARR 모드에서는 프리뷰 없음
+            # No preview in ARR mode
             loaded_pattern = None
             return
         if not pattern_files:
@@ -322,7 +322,7 @@ def main_curses(stdscr):
         if selected_idx < 0 or selected_idx >= len(pattern_files):
             loaded_pattern = None
             return
-        # 합성 프리뷰 모드에서는 composite_pattern을 그대로 사용
+        # In composite preview mode, use composite_pattern as-is
         if composite_mode and composite_pattern is not None:
             loaded_pattern = composite_pattern
             return
@@ -433,7 +433,7 @@ def main_curses(stdscr):
         if not composite_mode or composite_pattern is None:
             msg = "합성 패턴이 없습니다."
             return
-#여기부터
+# From here
         default_base = f"HYB_P{hyb_next_index:03d}"
 
         base = dialog_input(
@@ -456,7 +456,7 @@ def main_curses(stdscr):
         path = os.path.join(root, t)
 
 
-# 여기까지 
+# Up to here
         try:
             p = composite_pattern
             data = {
@@ -472,13 +472,13 @@ def main_curses(stdscr):
                 "grid": p.grid,
             }
             with open(path, "w", encoding="utf-8") as f:
-                import json as _json  # 로컬 import (aps_core의 json과 동일)
+                import json as _json  # Local import (same JSON schema as aps_core)
                 _json.dump(data, f, ensure_ascii=False, indent=2)
 
             msg = f"Saved hybrid pattern: {t}"
             hyb_next_index += 1
 
-            # 저장 후 패턴 목록 다시 스캔 (새 HYB_P9xx.APT를 보이게)
+            # After saving, rescan pattern list (so new HYB_P9xx.APT appears)
             pattern_files = scan_patterns(root)
             try:
                 new_idx = pattern_files.index(t)
@@ -493,7 +493,7 @@ def main_curses(stdscr):
         load_preview()
 
     def load_countin_from_arr(path: str):
-        """ARR 파일에서 #COUNTIN 헤더를 읽어 countin_idx를 복원."""
+        """ARR 파일에서 # Restore countin_idx by reading the COUNTIN header."""
         nonlocal countin_idx
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -505,7 +505,7 @@ def main_curses(stdscr):
                             countin_idx = -1
                         else:
                             name = mode_str
-                            # 프리셋 이름과 매칭
+                            # Match preset name
                             idx = -1
                             for i, p in enumerate(countin_presets):
                                 if p.name == name:
@@ -514,13 +514,13 @@ def main_curses(stdscr):
                             countin_idx = idx
                         break
         except Exception:
-            # 없거나 읽기 실패하면 그냥 무시
+            # If missing or failed to read, just ignore
             pass
 
     def choose_arr_file_curses(stdscr, arrs: List[str]) -> Optional[str]:
         """
-        ARR 파일 목록에서 하나를 선택하는 작은 팝업.
-        (현재 F-키에서는 사용하지 않지만, 남겨둠)
+        Small popup to choose one ARR file from the list.
+        (Not used by function keys currently, kept for reference.)
         """
         if not arrs:
             return None
@@ -651,13 +651,13 @@ def main_curses(stdscr):
 
     def open_stepseq_for_selected_pattern():
         """
-        현재 패턴 리스트에서 선택된 .ADT 패턴(2 bar, 32 step)을
-        스텝 시퀀서에 넘겨서 편집하고, 결과를 메모리상의 pat.grid에 반영한다.
-        P 키를 누르면 현재 StepGrid를 MIDI로 재생한다.
+        Take the .ADT pattern selected in the current pattern list (2 bars, 32 steps),
+        open it in the step sequencer for editing, and apply the result back to pat.grid in memory.
+        Press P to play the current StepGrid as MIDI.
         """
         nonlocal loaded_pattern, msg, selected_idx, pattern_files, bpm, midi_port
 
-        # 1) 이 함수는 패턴 리스트 포커스에서만 동작
+        # 1) This function only works when the pattern list has focus
         if list_mode != "patterns":
             msg = "StepSeq는 패턴 리스트에서만 사용 가능합니다."
             return
@@ -671,7 +671,7 @@ def main_curses(stdscr):
             msg = "StepSeq는 .ADT 패턴에서만 사용 가능합니다."
             return
 
-        # 2) ADT 로드
+        # 2) Load ADT
         path = os.path.join(root, fname)
         try:
             pat = load_adt(path)
@@ -679,7 +679,7 @@ def main_curses(stdscr):
             msg = f"ADT load error: {e}"
             return
 
-        # 3) 2 bar (32 step) 패턴만 지원
+        # 3) Only supports 2-bar (32-step) patterns
         if pat.length != 32:
             msg = f"StepSeq: length=32(2bar) 패턴만 지원 (현재 {pat.length})"
             return
@@ -749,12 +749,12 @@ def main_curses(stdscr):
                             )
                         )
 
-# 7) P 키에서 호출될 재생 콜백 정의
+# 7) Define the playback callback to be used by the P key
         def play_stepseq(grid, meta_inner):
             """
-            StepSeq 내부에서 Space 키를 눌렀을 때 호출되는 콜백.
-            현재 StepGrid를 MIDI로 한 번 재생하고,
-            재생 중에는 현재 재생 중인 bar 번호(1 또는 2)를 화면 아래에 표시한다.
+            Callback invoked when Space is pressed inside StepSeq.
+            Play the current StepGrid once as MIDI,
+            and during playback, display the current bar number (1 or 2) at the bottom of the screen.
             """
             if mido is None or not midi_port:
                 return
@@ -772,29 +772,29 @@ def main_curses(stdscr):
                 return
 
             try:
-                # StepGrid -> DrumEvent 리스트 (non_grid 이벤트는 없음)
+                # StepGrid -> DrumEvent list (no non_grid events)
                 events = aps_stepseq._apply_stepgrid_to_events(
                     grid,
                     meta_inner,
-                    [],  # non_grid_events 없음
+                    [],  # No non_grid_events
                 )
 
-                # tick → 시간 변환
+                # Tick → time conversion
                 ticks_per_quarter = 480.0
                 sec_per_quarter = 60.0 / float(meta_inner.bpm)
                 sec_per_tick = sec_per_quarter / ticks_per_quarter
 
                 import time as _time
 
-                # 2-bar 기준으로 bar 경계 계산
+                # Compute bar boundaries based on a 2-bar pattern
                 loop_len = meta_inner.loop_len_ticks
                 half_loop = loop_len // 2 if loop_len > 0 else 1
 
                 def show_bar_label(bar_no: int):
-                    # 그리드 아래쪽에 크게 표시
+                    # Display in large text at the bottom of the grid
                     max_y, max_x = stdscr.getmaxyx()
                     text = f" PLAYING BAR {bar_no} "
-                    y = max_y - 3  # footer 바로 위 줄 정도
+                    y = max_y - 3  # Roughly the line just above the footer
                     x = max(0, (max_x - len(text)) // 2)
                     try:
                         stdscr.addstr(y, x, text)
@@ -816,7 +816,7 @@ def main_curses(stdscr):
                     current_bar = None
 
                     for ev in events:
-                        # tick 기반으로 현재 bar 계산 (1 또는 2)
+                        # Compute current bar from ticks (1 or 2)
                         bar = 1 if ev.tick < half_loop else 2
 
                         if bar != current_bar:
@@ -839,18 +839,18 @@ def main_curses(stdscr):
                                 )
                             )
                         except Exception:
-                            # 개별 이벤트 실패는 무시
+                            # Ignore failures of individual events
                             pass
 
-                # 재생이 끝나면 표시 지우기
+                # Clear the display after playback finishes
                 clear_bar_label()
 
             except Exception:
-                # 재생 중 오류는 편집세션을 죽이지 않도록 무시
+                # Ignore playback errors so they don't kill the editing session
                 pass
 
 
-        # 8) 스텝 시퀀서 진입 (이제 P 키가 play_stepseq를 호출함)
+        # 8) Enter Step Sequencer (now P calls play_stepseq)
         modified, saved, new_events = aps_stepseq.stepseq_mode(
             stdscr,
             meta,
@@ -865,18 +865,18 @@ def main_curses(stdscr):
         except Exception:
             pass
 
-        # 9) 변경 사항도 없고 저장도 안 하면 그대로 종료
+        # 9) If nothing changed and nothing was saved, exit as-is
         if (not modified) and (not saved):
             msg = "StepSeq: 변경 없음"
             return
-        # 10) pat.grid에서 드럼 슬롯들만 모두 0으로 초기화
+        # 10) Clear only drum slots in pat.grid to zeros
         for step in range(steps):
             row = pat.grid[step]
             for slot_idx in note_to_slot.values():
                 if 0 <= slot_idx < len(row):
                     row[slot_idx] = 0
 
-        # 11) 새 DrumEvent를 grid에 다시 반영 (note_on만 사용)
+        # 11) Apply new DrumEvents back onto the grid (note_on only)
         for de in new_events:
             if de.type != "on" or de.chan != meta.channel:
                 continue
@@ -893,7 +893,7 @@ def main_curses(stdscr):
                 if 0 <= slot_idx < len(row):
                     row[slot_idx] = aps_stepseq.vel_to_level(getattr(de, 'vel', 0))
 
-        # 12) 수정된 패턴을 프리뷰로 사용
+        # 12) Use the modified pattern as the preview
         loaded_pattern = pat
         loaded_pattern = pat
         if saved:
@@ -920,7 +920,7 @@ def main_curses(stdscr):
             stdscr.addnstr(0, 0, menu.ljust(max_x0 - 1), max_x0 - 1)
         except curses.error:
             pass
-        # 안전 가드: midi_port가 아직 로컬에 없으면 기본값을 자동 선택
+        # Safety guard: if midi_port isn't set locally yet, auto-select a default
         if 'midi_port' not in locals():
             midi_port = find_gs()
         draw_status(
@@ -965,14 +965,14 @@ def main_curses(stdscr):
             chain_h = 3
             grid_h = right_h - chain_h
 
-        # 현재 왼쪽 리스트(패턴 / ARR) 결정
+        # Decide current left list (pattern / ARR)
         current_list = arr_files if list_mode == "arr" else pattern_files
 
         # Pattern / ARR list window
         list_win = stdscr.derwin(work_height, list_w, work_top, 0)
         list_win.box()
 
-        # 포커스 + 모드에 따라 제목 표현
+        # Title depends on focus + mode
         mode_tag = "PAT" if list_mode == "patterns" else "ARR"
         if focus == "patterns":
             title = f" ▶ {mode_tag} List "
@@ -990,11 +990,11 @@ def main_curses(stdscr):
             pass
 
         list_h, list_w2 = list_win.getmaxyx()
-        inner = list_h - 2                 # 한 화면에 보이는 "행" 수
+        inner = list_h - 2                 # Number of visible "rows" on screen
         col_w = (list_w2 - 2) // 2
         total = len(current_list)
 
-        # top_index가 너무 뒤로 밀려 있으면 보정
+        # If top_index is pushed too far back, clamp it
         if total > 0:
             max_top = max(0, total - 1)
             if top_index > max_top:
@@ -1004,7 +1004,7 @@ def main_curses(stdscr):
         else:
             top_index = 0
 
-        # --- 2열 리스트 렌더링 ---
+        # --- Render 2-column list ---
         for sr in range(inner):
             y = 1 + sr
             if y >= list_h - 1:
@@ -1078,7 +1078,7 @@ def main_curses(stdscr):
         grid_win = stdscr.derwin(grid_h, right_w, work_top, list_w + 1)
         draw_grid(loaded_pattern, grid_win, None, use_color, color_pairs)
 ####
-        # 합성 프리뷰일 때 A/B 패턴명 및 모드 표시
+        # In composite preview, show A/B pattern names and mode
         if composite_mode and len(bar_sources) == 2:
             try:
                 a_idx, b_idx = bar_sources[0], bar_sources[1]
@@ -1095,8 +1095,8 @@ def main_curses(stdscr):
                 mode_str = "A1 + B2" if not composite_swap else "B1 + A2"
                 gh, gw = grid_win.getmaxyx()
 
-                # 너무 오른쪽으로 밀리지 않도록 ‘표시 상한’을 둔다
-                # grid 내용은 보통 왼쪽 0~약 gw*0.75까지 사용 → 나머지 25% 공간만 사용
+                # Cap the display to avoid shifting too far to the right
+                # Grid usually uses the left 0..~gw*0.75; use only the remaining ~25% space
                 MAX_X = int(gw * 0.75)
 
                 def place_line(y, text):
@@ -1155,7 +1155,7 @@ def main_curses(stdscr):
         
         
 
-        # --- 헬퍼: 선택된 인덱스가 화면에 보이도록 스크롤 조정 ---
+        # --- Helper: adjust scroll so the selected index is visible ---
         def ensure_visible(total_len: int):
             nonlocal top_index, selected_idx, inner
             if inner <= 0 or total_len <= 0:
@@ -1172,11 +1172,11 @@ def main_curses(stdscr):
             if top_index < 0:
                 top_index = 0
 
-        # --- 헬퍼: 여러 줄 텍스트를 중앙 팝업(반전)으로 보여주기 ---
+        # --- Helper: show multi-line text in a centered reverse-video popup ---
         def show_text_popup(lines_to_show: List[str], title: str = "Info"):
             nonlocal stdscr
             max_y, max_x = stdscr.getmaxyx()
-            # 여백 포함한 폭/높이 계산
+            # Compute width/height including margins
             content = [ln.rstrip("\n") for ln in lines_to_show]
             if not content:
                 content = ["(empty)"]
@@ -1193,7 +1193,7 @@ def main_curses(stdscr):
                     t = f" {title} "
                     if len(t) < w - 2:
                         win.addnstr(0, max(1, (w - len(t)) // 2), t, w - 2, curses.A_REVERSE)
-                # 표시 가능한 줄 수
+                # Number of displayable lines
                 cap = h - 4
                 for i, ln in enumerate(content[:cap]):
                     win.addnstr(2 + i, 2, ln.ljust(w - 4), w - 4, curses.A_REVERSE)
@@ -1203,10 +1203,10 @@ def main_curses(stdscr):
                 win.refresh()
                 win.getch()
             except curses.error:
-                # fallback: 상태 메시지로
+                # Fallback: show as a status message
                 show_message(stdscr, f"{title}: " + (content[0] if content else ""), 2.0)
 
-        # --- F5: 선택 패턴을 9xx 번호로 즉시 복제 ---
+        # --- F5: duplicate the selected pattern into the 9xx range ---
 
         def show_text_viewer(lines_to_show: List[str], title: str = "View"):
             """Scrollable read-only text viewer (reverse style)."""
@@ -1281,19 +1281,19 @@ def main_curses(stdscr):
                 msg = "DupPat failed: bad pattern name"
                 return
             genre = base[:3]
-            # 901부터 빈 슬롯 탐색
+            # Search for an empty slot starting from 901
             for n in range(901, 999):
                 dst_base = f"{genre}_P{n:03d}"
                 dst_name = dst_base + ext
                 dst_path = os.path.join(root, dst_name)
                 if not os.path.exists(dst_path):
-                    # 파일 복사(바이너리)
+                    # Copy file (binary)
                     try:
                         with open(os.path.join(root, src_name), "rb") as fsrc:
                             data = fsrc.read()
                         with open(dst_path, "wb") as fdst:
                             fdst.write(data)
-                        # 리스트 갱신 및 새 파일 선택
+                        # Refresh list and select the new file
                         pattern_files = scan_patterns(root)
                         if dst_name in pattern_files:
                             selected_idx = pattern_files.index(dst_name)
@@ -1411,7 +1411,7 @@ def main_curses(stdscr):
             continue
 
 
-        # F2: Pat/ARR 리스트 토글 + 리프레시
+        # F2: toggle Pat/ARR list + refresh
         if ch == curses.KEY_F2:
             pattern_files = scan_patterns(root)
             arr_files = sorted(
@@ -1445,7 +1445,7 @@ def main_curses(stdscr):
                     msg = "Pattern list"
             continue
 
-        # F3: Refresh (현재 모드 유지, 디렉터리 재스캔)
+        # F3: refresh (keep current mode, rescan directory)
         if ch == curses.KEY_F3:
             pattern_files = scan_patterns(root)
             arr_files = sorted(
@@ -1549,26 +1549,28 @@ def main_curses(stdscr):
                 # Derive #PLAY (informational; sections + bare patterns)
                 play_lines: List[str] = []
                 last_sec = None
+                in_section = False
                 for e in chain:
                     sec = getattr(e, "section", None)
                     if sec:
                         if sec != last_sec:
                             play_lines.append(sec)
                             last_sec = sec
+                        in_section = True
                     else:
-                        idx = pool_map.get(getattr(e, "filename", ""), None)
-                        rep = int(getattr(e, "repeats", 1) or 1)
-                        if idx is not None:
-                            if rep > 1:
-                                play_lines.append(f"@{idx}x{rep}")
-                            else:
-                                play_lines.append(f"@{idx}")
+                        # If a section label is present, do not emit per-pattern indices for that section in #PLAY.
+                        if not in_section:
+                            idx = pool_map.get(getattr(e, "filename", ""), None)
+                            rep = int(getattr(e, "repeats", 1) or 1)
+                            if idx is not None:
+                                play_lines.append(f"{idx}x{rep}" if rep > 1 else f"{idx}")
                         last_sec = None
 
                 out_lines: List[str] = []
                 out_lines.extend(header_lines)
                 out_lines.extend(section_lines)
-                out_lines.append("# APS ARR v1")
+                out_lines.append("#APS ARR v0.05")
+                out_lines.append("")
                 out_lines.append(f"BPM={bpm}")
                 out_lines.append("")
                 for i, fn in enumerate(pool, start=1):
@@ -1584,7 +1586,7 @@ def main_curses(stdscr):
                 show_text_viewer(out_lines, title="CURRENT ARR (preview)")
                 continue
 
-        # F5: DupPat (선택 패턴을 9xx로 즉시 복제)
+        # F5: DupPat (duplicate selected pattern into 9xx)
         if ch == curses.KEY_F5:
             duplicate_selected_pattern()
             continue
@@ -1593,22 +1595,22 @@ def main_curses(stdscr):
                 show_pattern_info_curses(stdscr, loaded_pattern)
             continue
 
-        # F6: MIDI 포트 선택
+        # F6: select MIDI port
         if ch == curses.KEY_F6:
             name = choose_midi_port_curses(stdscr)
             if name:
                 midi_port = name
             continue
 
-        # F7: 저장
-        # - 합성 모드(composite_mode=True)면 HYB_P9xx.APT로 패턴 저장
-        # - 그 외에는 기존처럼 ARR 저장
+        # F7: save
+        # - In composite mode (composite_mode=True), save the pattern as HYB_P9xx.APT
+        # - Otherwise, save ARR in the current working directory (legacy behavior)
         if ch in (curses.KEY_F7, ord('w'), ord('W')):
             if composite_mode and composite_pattern is not None:
                 save_composite_pattern()
                 continue
 
-            # ARR 저장: ADP가 섞여 있으면 ARR에는 .ADT로 바꿔서 저장 + 메시지
+            # When saving ARR: if ADP is mixed in, write .ADT in ARR and show a message
             if not chain:
                 try:
                     dialog_alert(stdscr, "Chain is empty.")
@@ -1671,7 +1673,7 @@ def main_curses(stdscr):
                 continue
 
             try:
-                # ADP → ADT 변환을 반영한 복사본을 만들어 저장
+                # Save a converted copy reflecting ADP → ADT conversion
                 chain_for_save = [ChainEntry(e.filename, e.repeats) for e in chain]
                 had_adp = False
                 for e in chain_for_save:
@@ -1680,17 +1682,29 @@ def main_curses(stdscr):
                         b0, _ext0 = os.path.splitext(e.filename)
                         e.filename = b0 + ".ADT"
 
-                # 1차로 기본 ARR를 저장
+                # First, write the base ARR
                 save_arr(path, chain_for_save, bpm)
 
-                # 그 뒤에 #COUNTIN / #SECTION 헤더를 삽입하여 상태 기록
+                # Then insert #COUNTIN / #SECTION headers to record state
                 try:
+                    import re  # local: used for parsing pool lines
+                    # Re-open the just-saved ARR and rewrite headers while preserving body.
+                    # Also (re)generate #PLAY metadata so it is not lost on save.
                     old_lines: List[str] = []
+                    in_play = False
                     with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                        for line in f:
+                        for raw in f:
+                            line = raw.rstrip("\n")
+                            if in_play:
+                                if line.strip().upper() == "#ENDPLAY":
+                                    in_play = False
+                                continue
+                            if line.strip().upper() == "#PLAY":
+                                in_play = True
+                                continue
                             if line.startswith("#COUNTIN") or line.startswith("#SECTION"):
                                 continue
-                            old_lines.append(line.rstrip("\n"))
+                            old_lines.append(line)
 
                     ci_label = get_countin_label()
                     if ci_label in (None, "None"):
@@ -1712,14 +1726,78 @@ def main_curses(stdscr):
                     if cur_sec:
                         section_blocks.append((cur_sec, sec_start, len(chain) - 1))
 
+                    # Build a filename -> pool index map from the saved body (preferred),
+                    # falling back to the in-memory chain order.
+                    pool_map = {}
+                    for ln in old_lines:
+                        m = re.match(r"^(\d+)=(.+)$", ln.strip())
+                        if m:
+                            try:
+                                idx = int(m.group(1))
+                            except Exception:
+                                continue
+                            fn = m.group(2).strip()
+                            if fn and fn not in pool_map:
+                                pool_map[fn] = idx
+                    if not pool_map:
+                        for e in chain_for_save:
+                            fn = getattr(e, "filename", "")
+                            if fn and fn not in pool_map:
+                                pool_map[fn] = len(pool_map) + 1
+
+                    # Derive #PLAY lines (metadata only)
+                    # Build #PLAY metadata using the in-memory chain so section labels are preserved.
+                    # Note: #PLAY is metadata only; playback is driven by MAIN|...
+                    play_lines: List[str] = []
+                    last_sec = None
+                    in_section = False
+                    for e in chain:
+                        sec = getattr(e, "section", None)
+                        if sec:
+                            if sec != last_sec:
+                                play_lines.append(str(sec))
+                                last_sec = sec
+                            # If a section label is present, do not emit per-pattern indices for that section in #PLAY.
+                            continue
+
+                        # No section: emit pool index token
+                        last_sec = None
+                        fn = getattr(e, "filename", "")
+                        if fn.lower().endswith(".adp"):
+                            b0, _ext0 = os.path.splitext(fn)
+                            fn = b0 + ".ADT"
+                        idx = pool_map.get(fn)
+                        rep = int(getattr(e, "repeats", 1) or 1)
+                        if idx is None:
+                            continue
+                        play_lines.append(f"{idx}x{rep}" if rep > 1 else f"{idx}")
                     with open(path, "w", encoding="utf-8") as f:
                         f.write(header + "\n")
                         for sec, s2, e2 in section_blocks:
-                            f.write(f"#SECTION {sec} {s2} {e2}\n")
+                            f.write(f"#SECTION {sec} {s2+1} {e2+1}\n")
+                        if play_lines:
+                            f.write("#PLAY\n")
+                            for pl in play_lines:
+                                f.write(pl + "\n")
+                            f.write("#ENDPLAY\n")
+                        prev_blank = False
                         for ln in old_lines:
+                            s = ln.strip()
+                            # Normalize version tag line
+                            if s.startswith("# APS ARR") or s.startswith("#APS ARR"):
+                                f.write("#APS ARR v0.05\n")
+                                prev_blank = False
+                                continue
+
+                            # Ensure one blank line right before BPM=
+                            if s.startswith("BPM=") and not prev_blank:
+                                f.write("\n")
+                                prev_blank = True
+
                             f.write(ln + "\n")
+                            prev_blank = (s == "")
                 except Exception:
-                    # 헤더 추가 실패해도 기본 ARR는 살아 있으므로 조용히 무시
+                    # Even if header insertion fails, keep the base ARR; ignore quietly
                     pass
 
                 if had_adp:
@@ -1729,14 +1807,14 @@ def main_curses(stdscr):
             except Exception as e:
                 msg = str(e)
             continue
-        # F8: Count-in 선택
+        # F8: choose Count-in
         if ch == curses.KEY_F8:
             new_idx = choose_countin_curses(stdscr, countin_idx)
             if new_idx is not None:
                 countin_idx = new_idx  # -1 = None, 0..N-1 = preset
             continue
 
-        # F9: BPM 변경
+        # F9: change BPM
         if ch == curses.KEY_F9:
             s = dialog_input(stdscr, f"BPM (current {bpm}):", default_text=str(bpm), maxlen=6)
             if s is None:
@@ -1751,27 +1829,27 @@ def main_curses(stdscr):
                 pass
             continue
 
-        # 포커스 토글 (Tab)
+        # Toggle focus (Tab)
         if ch == ord("\t"):
             focus = "chain" if focus == "patterns" else "patterns"
             continue
 
-        # 체인 포커스: 이동/반복/삭제/섹션 정의 등 (블록 편집 포함)
+        # Chain focus: move/repeat/delete/define sections, etc. (includes block editing)
         if focus == "chain":
-            # ESC: 블록 선택 해제
+            # ESC: clear block selection
             if ch == 27:  # ESC
                 if selection.get_range():
                     selection.reset()
                     msg = "Selection cleared"
                 continue
 
-            # 체인 창에 포커스가 있을 때는 Enter로 패턴을 삽입하지 않는다.
+            # When chain window has focus, Enter does not insert a pattern
             if ch in (10, 13):  # Enter
                 continue
 
             rng = selection.get_range()
 
-            # 1) Delete 키: 블록 삭제 (선택 범위 전체 삭제)
+            # 1) Delete: delete block (delete the entire selected range)
             if ch == curses.KEY_DC and rng and chain:
                 push_undo()
                 start, end = rng
@@ -1789,7 +1867,7 @@ def main_curses(stdscr):
                 msg = f"Deleted {del_count} step(s)"
                 continue
 
-            # 2) x / X: 블록 잘라내기 (Cut)
+            # 2) x / X: cut block
             if ch in (ord("x"), ord("X")) and rng and chain:
                 push_undo()
                 start, end = rng
@@ -1811,7 +1889,7 @@ def main_curses(stdscr):
                 msg = f"Cut {del_count} step(s)"
                 continue
 
-            # 3) y / Y: 블록 복사 (Copy)
+            # 3) y / Y: copy block
             if ch in (ord("y"), ord("Y")) and rng and chain:
                 start, end = rng
                 if start < 0:
@@ -1823,9 +1901,10 @@ def main_curses(stdscr):
                     for e in chain[start : end + 1]
                 ]
                 msg = f"Copied {len(clipboard)} step(s)"
+                selection.reset()
                 continue
 
-            # 4) p / P: 붙여넣기 (클립보드/섹션 중 선택 후, 위/아래 위치 선택)
+            # 4) p / P: paste (choose from clipboard/section, then choose above/below position)
             if ch in (ord("p"), ord("P")):
                 choice = choose_block_or_section_curses(
                     stdscr, clipboard, section_mgr, chain
@@ -1879,7 +1958,7 @@ def main_curses(stdscr):
                         msg = f"Section '{sec}' removed"
                 continue
 
-# 체인 키 기본 처리 (이동, 한 줄 단위 삭제/반복, O/o 등)
+# Default handling for chain keys (move, single-line delete/repeat, O/o, etc.)
             chain_selected_idx, changed = handle_chain_keys(
                 ch,
                 chain,
@@ -1931,12 +2010,12 @@ def main_curses(stdscr):
             if ch not in (ord(" "),):
                 continue
 
-        # Pattern list focus: 패턴/ARR 선택 이동
+        # Pattern list focus: move selection within the pattern/ARR list
         if focus == "patterns":
             current_list = arr_files if list_mode == "arr" else pattern_files
             total = len(current_list)
 
-            # ↑ / k : 한 항목 위로
+            # ↑ / k: move up one item
             if ch in (curses.KEY_UP, ord("k")):
                 if total > 0 and selected_idx > 0:
                     selected_idx -= 1
@@ -1945,7 +2024,7 @@ def main_curses(stdscr):
                         load_preview()
                 continue
 
-            # ↓ / j : 한 항목 아래로
+            # ↓ / j: move down one item
             if ch in (curses.KEY_DOWN, ord("j")):
                 if total > 0 and selected_idx < total - 1:
                     selected_idx += 1
@@ -1954,7 +2033,7 @@ def main_curses(stdscr):
                         load_preview()
                 continue
 
-            # ← / h : 오른쪽 컬럼 → 왼쪽 컬럼
+            # ← / h: right column → left column
             if ch in (curses.KEY_LEFT, ord("h")) and inner > 0:
                 if total > 0:
                     visible_cap = inner * 2
@@ -1969,7 +2048,7 @@ def main_curses(stdscr):
                                     load_preview()
                 continue
 
-            # → / l : 왼쪽 컬럼 → 오른쪽 컬럼
+            # → / l: left column → right column
             if ch in (curses.KEY_RIGHT, ord("l")) and inner > 0:
                 if total > 0:
                     visible_cap = inner * 2
@@ -2018,7 +2097,7 @@ def main_curses(stdscr):
                 composite_swap = False
                 continue
 
-            # 's' / 'S' : Step Sequencer 진입
+            # 's' / 'S': enter Step Sequencer
             if list_mode == "patterns" and ch in (ord("s"), ord("S")):
                 open_stepseq_for_selected_pattern()
                 if list_mode == "patterns":
@@ -2038,7 +2117,7 @@ def main_curses(stdscr):
                     msg = "A/B로 사용할 패턴 두 개를 먼저 'b'로 선택하세요."
                 continue
 
-            # ESC : 합성 프리뷰/선택 해제
+            # ESC: clear composite preview/selection
             if ch == 27:  # ESC
                 if composite_mode:
                     composite_mode = False
@@ -2052,9 +2131,9 @@ def main_curses(stdscr):
                     pass
                 continue
 
-        # ===== 공통 동작 =====
+        # ===== Common behaviors =====
 
-        # Enter: 체인에 삽입
+        # Enter: insert into chain
         if focus == "patterns" and ch in (10, 13):
             if list_mode == "patterns":
                 if pattern_files:

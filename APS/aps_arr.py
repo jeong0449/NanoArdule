@@ -85,12 +85,16 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
     for ln in lines:
         # Section definition: "#SECTION <name> <start> <end>"
         # Must be handled before generic '#' comments
+       
         if ln.startswith("#SECTION"):
             parts = ln.split()
             if len(parts) >= 4:
                 _, name, s, e = parts[:4]
                 try:
-                    sections[name] = (int(s), int(e))
+                    # ARR is 1-based, internal is 0-based (inclusive)
+                    s0 = int(s) - 1
+                    e0 = int(e) - 1
+                    sections[name] = (s0, e0)
                 except ValueError:
                     pass
             continue
