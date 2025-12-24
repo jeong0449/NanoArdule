@@ -43,7 +43,7 @@ A real-time drum pattern engine for **Arduino Nano / Nano Every**.
 
 ---
 
-### 3. Ardule Pattern Studio — APS (PC Toolchain)
+### 3. Ardule Pattern Studio — APS
 
 **Ardule Pattern Studio (APS)** is a lightweight, terminal-based PC application and toolchain for drum pattern authoring, validation, and playback.  
 Originally developed to support Nano Ardule firmware by providing pattern data and verification tools, APS has evolved into a standalone application that can be used independently of the hardware.
