@@ -241,7 +241,7 @@ Detailed documentation is organized by topic under the `docs/` directory.
 - [Project overview](./docs/overview.md)
 - [Architecture]
 - [Nano Ardule Drum Pattern Player firmware]
-- [Ardule Pattern Studio (APS)](./APS/overview.md)
+- [Ardule Pattern Studio (APS) Keymap](./APS/APS_Keymap_2025-12-21.md)
 - [ADT v2.2a specification](./specs/ADT_v2.2a.md)
 - [ADP v2.2 specification](./specs/ADP_v2.2.md)
 - [ADC toolchain manuals]
