@@ -67,3 +67,7 @@ Because A6 does not support the internal pull-up resistor, an **external pull-up
 | A6          | PART SELECT Button    | Analog input only, external pull-up required     |
 
 ---
+
+## Nano Ardule Hardware Prototype
+
+<img src="../images/Nano_Ardule.png"  width="600" alt="Nano Ardule prototype enclosed in a plastic case">
