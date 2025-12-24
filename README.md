@@ -21,7 +21,7 @@ The drum pattern player requires higher performance and therefore uses an **Ardu
 Depending on the intended use, the Arduino board can be swapped via a socket.
 
 For detailed hardware documentation, including schematics and implementation notes, see  
-[`docs/hardware.md`](./docs/hardware.md).
+[`hardware.md`](./docs/hardware.md).
 
 
 ## 2. Nano Ardule Drum Pattern Player (Firmware)
