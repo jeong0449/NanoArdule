@@ -8,13 +8,13 @@ For design rationale and firmware behavior, refer to the main README.
 
 ## Wiring Diagram
 
-![Nano Ardule Wiring Diagram](./images/Nano_Ardule_Wiring_Diagram.svg)
+![Nano Ardule Wiring Diagram](../images/Nano_Ardule_Wiring_Diagram.svg)
 
 ---
 
 ## MIDI Interface Schematic
 
-![MIDI Schematic](./images/MIDI_schematics.png)
+![MIDI Schematic](../images/MIDI_schematics.png)
 
 ---
 
