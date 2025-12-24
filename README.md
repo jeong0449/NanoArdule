@@ -15,7 +15,14 @@ With the addition of the **ADC Toolchain (adc- prefix)**, Ardule now supports au
 
 ## 1. The Hardware: Nano Ardule
 
-> Content will be added in a future update.
+The hardware is assembled on a perfboard, where an Arduino Nano and other components are hand-wired and securely mounted.
+
+The drum pattern player requires higher performance and therefore uses an **Arduino Nano Every**, while the MIDI controller firmware is intended for the classic **Arduino Nano**.  
+Depending on the intended use, the Arduino board can be swapped via a socket.
+
+For detailed hardware documentation, including schematics and implementation notes, see  
+[`docs/hardware.md`](./docs/hardware.md).
+
 
 ## 2. Nano Ardule Drum Pattern Player (Firmware)
 
