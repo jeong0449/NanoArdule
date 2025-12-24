@@ -2,7 +2,7 @@
 
 This document provides a minimal overview of the Nano Ardule hardware.
 Only the wiring diagram, MIDI schematic, and pin mapping are described here.
-For design rationale and firmware behavior, refer to the main README.
+For design rationale and firmware behavior, refer to the main [`README`](./READEME.md).
 
 ---
 
