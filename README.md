@@ -239,11 +239,11 @@ Use GitHub Issues for questions and suggestions.
 Detailed documentation is organized by topic under the `docs/` directory.
 
 - [Project overview](./docs/overview.md)
-- [Architecture](./docs/architecture.md)
-- [Nano Ardule Drum Pattern Player firmware](./docs/firmware/drum-pattern-player.md)
-- [Ardule Pattern Studio (APS)](./docs/APS/overview.md)
+- [Architecture]
+- [Nano Ardule Drum Pattern Player firmware]
+- [Ardule Pattern Studio (APS)](./APS/overview.md)
 - [ADT v2.2a specification](./specs/ADT_v2.2a.md)
 - [ADP v2.2 specification](./specs/ADP_v2.2.md)
-- [ADC toolchain manuals](./docs/tools/README.md)
+- [ADC toolchain manuals]
 
 > Some documents are placeholders and will be expanded in future updates.
