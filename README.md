@@ -81,7 +81,7 @@ The ADC Toolchain converts external MIDI drum patterns into **ADT v2.2/v2.2a** f
 
 | Script | Description |
 |--------|-------------|
-| [`adc-midtool.py`](./tools/adc-midtool.py) | Unified MIDI manager (scan, rename to 8.3, Type1→0, INDEX.TXT, GM drum check, CSV/JSON) |
+| [`adc-midtool.py`](./tools/adc-midtool.py) | Unified MIDI manager for batch processing all .MID files in a directory (scan, 8.3 rename, Type-1→0, INDEX.TXT, GM drum check, CSV/JSON). |
 | [`adc-mid2report.py`](./tools/adc-mid2report.py) | Integrated MIDI report tool with triplet-aware subdivision analysis and ADT conversion hints. |
 | [`adc-split-drum-2bar-save.py`](./tools/adc-split-drum-2bar-save.py) | CH10-only 2-bar MIDI slicer that saves <GEN>_Pnnn patterns, with optional grid PNG and A4 PDF export. |
 | [`adc-drum-sim-matrix.py`](./tools/adc-drum-sim-matrix.py) | Compute all-pairs similarity matrices (Hamming/Cosine) for 2-bar CH10 drum pattern MIDI files using a 12-slot × N-column binary grid. |
@@ -93,9 +93,12 @@ The ADC Toolchain converts external MIDI drum patterns into **ADT v2.2/v2.2a** f
 ### Example Workflow
 
 ```
-python ./tools/adc-mid2adt.py input.mid -o pattern.adt
-python ./tools/adc-clean.py pattern.adt
-python ./tools/adc-adt2adp.py pattern.adt
+python .\tools\adc-midtool.py
+python .\tools\adc-mid2report.py .\INPUT.MID
+python .\tools\adc-split-drum-2bar-save.py .\6AFROCUB.MID --genre LAT --export-grid --grid-pdf --start 31
+python .\tools\adc-split-drum-2bar-save.py --print-genre-only .\6AFROCUB.MID
+python .\tools\adc-mid2adt.py --in-dir MID --out-dir ADT
+python .\tools\adc-adt2adp.py --in-dir ADT --out-dir ADP
 ```
 
 ---
