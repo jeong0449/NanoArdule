@@ -152,11 +152,11 @@ and consistent runtime behavior.
 
 ```
 /firmware/      # Arduino firmware
-/APS/           # Pattern Studio
+/APS/           # Ardule Pattern Studio (python scripts)
 /specs/         # Format specifications
 /patterns/      # Pattern datasets
-/tools/         # ADC toolchain (adc- scripts)
-/docs/          # Manuals
+/tools/         # ADC toolchain (adc- python scripts)
+/docs/          # Manuals and related documents
 /images/        # Diagrams, screenshots
 ```
 
