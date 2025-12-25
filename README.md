@@ -26,13 +26,21 @@ For detailed hardware documentation, including schematics and implementation not
 
 ## 2. Nano Ardule Drum Pattern Player (Firmware)
 
-> **Firmware scope**  
-> This repository currently focuses on the **Drum Pattern Player firmware**, which implements the ADT/ADP-based
-> pattern playback engine and serves as the reference implementation of the Ardule pattern system.  
->  
-> Another firmware variant (e.g. a **Type-0 MIDI file player** with program change, layering, splitting, and more; see the demo video on YouTube: https://www.youtube.com/watch?v=ZyeiwCxAJcU) exists internally and are not part of the public
-> release at this time, but **may be published in the future as the project evolves and matures**.
-A real-time drum pattern engine for **Arduino Nano / Nano Every**.
+## Firmware Scope
+
+This repository currently focuses on the **Drum Pattern Player firmware**,
+which implements the ADT/ADP-based pattern playback engine and serves as the
+reference implementation of the Ardule pattern system.
+
+Another firmware variant, the **MIDI Controller** (e.g. a **Type-0 MIDI file
+player** with program change, layering, splitting, and more; see the demo
+video on YouTube: https://www.youtube.com/watch?v=ZyeiwCxAJcU), exists
+internally and is not part of the public release at this time, but **may be
+published in the future as the project evolves and matures**.
+
+This firmware is designed as a real-time drum pattern engine for
+**Arduino Nano / Nano Every**.
+
 
 - ADS streaming engine  
 - GM/GS/XG CH10 playback  
