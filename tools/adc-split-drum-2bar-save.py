@@ -104,7 +104,7 @@ def convert_pdf_to_a4_with_ghostscript(gs_exe: str, input_pdf: Path, output_pdf:
 GENRE_MAP = [
     # Rock / Bossa / Funk / Jazz / Blues / Pop / Ballad
     (re.compile(r'rock', re.I), 'RCK'),
-    (re.compile(r'bossa|bossanova|bosa', re.I), 'BOS'),
+    (re.compile(r'bossa|bossanova|bosa', re.I), 'BSN'),
     (re.compile(r'funk', re.I), 'FNK'),
     (re.compile(r'jazz', re.I), 'JZZ'),
     (re.compile(r'blues?', re.I), 'BLU'),
@@ -113,8 +113,8 @@ GENRE_MAP = [
 
     # Latin + Afro-Cuban + Cha-cha
     (re.compile(r'latin', re.I), 'LAT'),
-    (re.compile(r'afrocub|afro[\s\-_]*cuban', re.I), 'LAT'),
-    (re.compile(r'chacha|cha[\s\-_]*cha', re.I), 'LAT'),
+    (re.compile(r'afrocub|afro[\s\-_]*cuban', re.I), 'AFC'),   # ← 변경
+    (re.compile(r'chacha|cha[\s\-_]*cha', re.I), 'CHA'),     # ← 변경
 
     # Samba / Waltz / Swing / Shuffle / Reggae / Metal
     (re.compile(r'samba', re.I), 'SMB'),
@@ -123,6 +123,9 @@ GENRE_MAP = [
     (re.compile(r'shuffle|shf', re.I), 'SHF'),
     (re.compile(r'reggae', re.I), 'REG'),
     (re.compile(r'metal', re.I), 'MTL'),
+
+    # Boogie (new)
+    (re.compile(r'boogie|bog', re.I), 'BOG'),                 # ← 추가
 
     # Hip-hop
     (re.compile(r'hip\s*-?\s*hop|hiphop|hhp', re.I), 'HHP'),
@@ -137,6 +140,7 @@ GENRE_MAP = [
     (re.compile(r'house|hse', re.I), 'HSE'),
     (re.compile(r'techno|tno', re.I), 'TNO'),
 ]
+
 
 
 def strip_leading_digits(name_noext: str) -> str:
@@ -256,9 +260,9 @@ def detect_steps_per_bar_for_pattern(
 
         score = 0.0
         for t in tick_positions:
-            # bar 단위로 나누어 생각
+
             t_mod = t % bar_ticks
-            # 가장 가까운 grid 라인까지 거리
+
             grid_idx = round(t_mod / step_ticks)
             nearest = grid_idx * step_ticks
             d = t_mod - nearest
@@ -375,13 +379,24 @@ def export_pattern_grid_png(
     cols: int = 32,
 ) -> None:
     """
-    Export ADP/ADT-style 2-bar drum grid PNG.
+    Export a 2-bar drum grid PNG.
 
     X-axis:  cols columns (default 32 = 16 steps/bar)
-    Y-axis:  12 rows:
-       - top:  OTHER note rows (each note number is a label)
-       - bottom: drum slots (slot index 0..11, labels in SLOT_LABELS,
-                 BD at the very bottom).
+
+    Y-axis (12 rows):
+    - Default "base layout" uses these 12 GM drum notes, ordered by MIDI note number
+      (lower note numbers go to lower rows):
+        36, 37, 38, 39, 42, 43, 44, 46, 47, 50, 51, 56
+      (BD, RS, SD, CP, CH, FT(43), PH, OH, MT, HT, RD, CB)
+      These rows always exist (they "occupy a place") when the slice uses only notes
+      from this base set.
+
+    - If the slice contains any drum note outside the base layout:
+      * If distinct notes <= 12: use the slice's own note set (sorted by note number).
+      * If distinct notes  > 12: keep the 12 most frequent notes (tie-break by lower
+        note number), and print a warning listing kept/dropped notes.
+
+    In all cases, the displayed row order is "lower note number at the bottom".
     """
     if not PIL_AVAILABLE:
         print(f"[WARN] Pillow not available; cannot export grid for {out_path.name}")
@@ -391,56 +406,98 @@ def export_pattern_grid_png(
     if L <= 0:
         return
 
-    # 1) analyze used slots / other notes
-    used_slots: Set[int] = set()
-    other_notes_set: Set[int] = set()
-
+    # ---- 1) Count note occurrences from this slice (events_by_tick: rel_tick -> set(notes)) ----
+    from collections import Counter
+    note_counts: Counter[int] = Counter()
     for notes in pattern.events_by_tick.values():
         for nt in notes:
-            sl = note_to_slot(nt)
-            if sl is None or sl < 0 or sl >= N_SLOTS:
-                other_notes_set.add(nt)
-            else:
-                used_slots.add(sl)
+            note_counts[nt] += 1
 
-    used_slots_sorted = sorted(used_slots)
-    other_notes_sorted = sorted(other_notes_set)
+    if not note_counts:
+        return
 
-    # 2) row allocation
-    free_rows = max(0, N_SLOTS - len(used_slots_sorted))
-    n_others_to_show = min(len(other_notes_sorted), free_rows)
-    shown_others = other_notes_sorted[:n_others_to_show]
+    # ---- 2) Decide which 12 notes occupy the rows ----
+    BASE_NOTES = [36, 37, 38, 39, 42, 43, 44, 46, 47, 50, 51, 56]
+    base_set = set(BASE_NOTES)
+    used_notes = set(note_counts.keys())
 
-    slot_row_quota = N_SLOTS - n_others_to_show
-
-    unused_slots_sorted = sorted(set(range(N_SLOTS)) - set(used_slots_sorted))
-    extra_slots_needed = max(0, slot_row_quota - len(used_slots_sorted))
-    extra_slots = unused_slots_sorted[:extra_slots_needed]
-
-    slot_rows_all = used_slots_sorted + extra_slots
-    slot_rows_for_display = sorted(slot_rows_all, reverse=True)  # BD at bottom
-
-    row_types: List[Tuple[str, int]] = []
-    row_labels: List[str] = []
-
-    for note in shown_others:
-        row_types.append(('other', note))
-        row_labels.append(str(note))
-
-    for sl in slot_rows_for_display:
-        row_types.append(('slot', sl))
-        if 0 <= sl < len(SLOT_LABELS):
-            row_labels.append(SLOT_LABELS[sl])
+    if used_notes.issubset(base_set):
+        # Use the fixed base layout (always occupies rows)
+        selected_notes = sorted(BASE_NOTES)
+        dropped_items = []
+        kept_items = [(n, note_counts.get(n, 0)) for n in selected_notes]
+    else:
+        # Use the slice's note set (or top-12) when it differs from the base layout
+        items = sorted(note_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        if len(items) > 12:
+            kept_items = items[:12]
+            dropped_items = items[12:]
+            kept_str = ", ".join([f"{n}({c})" for n, c in kept_items])
+            dropped_str = ", ".join([f"{n}({c})" for n, c in dropped_items])
+            print(f"[WARN] {out_path.stem}: >12 notes used; keeping top 12, dropping {len(dropped_items)} note(s).")
+            print(f"       kept   : {kept_str}")
+            print(f"       dropped: {dropped_str}")
         else:
-            row_labels.append(f"S{sl}")
+            kept_items = items
+            dropped_items = []
 
-    rows = len(row_types)
-    if rows == 0:
-        rows = 1
-        row_types = []
-        row_labels = ["(empty)"]
+        selected_notes = sorted([n for n, _ in kept_items])
 
-    # 3) image geometry
+    selected_set = set(selected_notes)
+
+    # ---- 3) Abbreviation mapping (GM-oriented, with fallback) ----
+    GM_ABBR = {
+    35: "KK", 36: "KK",        # Kick / Bass Drum
+    37: "RM",                  # Rim / Side Stick
+    38: "SN", 40: "SN",        # Snare
+    39: "CL",                  # Clap
+    42: "CH",                  # Closed Hi-Hat
+    44: "PH",                  # Pedal Hi-Hat
+    46: "OH",                  # Open Hi-Hat
+    
+    41: "LT", 43: "LT",        # Low / Floor Tom
+    45: "LT",
+    47: "MT",                  # Mid Tom
+    48: "MT",
+    50: "HT",                  # High Tom
+    
+    49: "CR", 52: "CR", 55: "CR", 57: "CR",   # Crash
+    51: "RD", 53: "RD", 59: "RD",             # Ride
+    56: "CB",                                   # Cowbell
+    }
+
+
+
+    def abbr_for_note(n: int) -> str:
+        a = GM_ABBR.get(n)
+        if a:
+            return a
+        return f"N{n}"
+
+    # ---- 4) Build rows (always 12) ----
+    # Display order:
+    #  - If the MIDI uses the base 12-note set, use the grouped APS order (top->bottom).
+    #  - Otherwise, keep numeric ordering (higher notes at the top).
+    DISPLAY_ORDER_NOTES = [56, 51, 50, 47, 43, 46, 44, 42, 39, 38, 37, 36]
+    if selected_set == base_set:
+        ordered_notes = [n for n in DISPLAY_ORDER_NOTES if n in selected_set]
+    else:
+        ordered_notes = list(reversed(sorted(selected_notes)))
+
+    # If fewer than 12 notes are selected, pad at the top (higher rows) with '--'.
+    pad = max(0, 12 - len(ordered_notes))
+    row_notes_display = [None] * pad + ordered_notes
+
+    row_labels: List[str] = [("--" if n is None else abbr_for_note(n)) for n in row_notes_display]
+    rows = len(row_notes_display)
+
+    # Map note -> row index
+    row_index_for_note: Dict[int, int] = {}
+    for idx, n in enumerate(row_notes_display):
+        if n is not None:
+            row_index_for_note[n] = idx
+
+    # ---- 5) image geometry ----
     cell_w = 10
     cell_h = 10
     left_margin = 40
@@ -463,13 +520,12 @@ def export_pattern_grid_png(
     except Exception:
         font_label = font_title
 
-    # 4) title centered
+    # ---- 6) title centered ----
     if hasattr(draw, "textbbox"):
         bbox = draw.textbbox((0, 0), title, font=font_title)
         text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
     else:
-        text_w, text_h = draw.textsize(title, font=font_title)
+        text_w, _ = draw.textsize(title, font=font_title)
 
     title_x = (width - text_w) // 2
     title_y = 5
@@ -478,7 +534,7 @@ def export_pattern_grid_png(
     gx = left_margin
     gy = top_margin
 
-    # 5) vertical grid lines (bar / beat)
+    # ---- 7) vertical grid lines (bar / beat) ----
     cols_per_bar = cols // 2
     beat_step = cols_per_bar // 4 if cols_per_bar >= 4 else 1
 
@@ -502,21 +558,12 @@ def export_pattern_grid_png(
         y = gy + r * cell_h
         draw.line((gx, y, gx + cols * cell_w, y), fill=(220, 220, 220))
 
-    # 6) row headers
+    # ---- 8) row headers ----
     for idx, label in enumerate(row_labels):
         y = gy + idx * cell_h + 2
         draw.text((5, y), label, fill=(0, 0, 0), font=font_label)
 
-    # 7) row index maps
-    row_index_for_slot: Dict[int, int] = {}
-    row_index_for_other: Dict[int, int] = {}
-    for idx, (kind, val) in enumerate(row_types):
-        if kind == 'slot':
-            row_index_for_slot[val] = idx
-        else:
-            row_index_for_other[val] = idx
-
-    # 8) events
+    # ---- 9) events ----
     ticks_per_col = L / cols if cols > 0 else 1.0
     for t, notes in pattern.events_by_tick.items():
         col = int(round(t / ticks_per_col)) if ticks_per_col > 0 else 0
@@ -524,14 +571,14 @@ def export_pattern_grid_png(
             col = 0
         if col >= cols:
             col = cols - 1
+
         for nt in notes:
-            sl = note_to_slot(nt)
-            if sl is not None and sl in row_index_for_slot:
-                row = row_index_for_slot[sl]
-            elif nt in row_index_for_other:
-                row = row_index_for_other[nt]
-            else:
+            if nt not in selected_set:
                 continue
+            row = row_index_for_note.get(nt)
+            if row is None:
+                continue
+
             x0 = gx + col * cell_w + 1
             y0 = gy + row * cell_h + 1
             x1 = x0 + cell_w - 2
@@ -540,7 +587,6 @@ def export_pattern_grid_png(
 
     img.save(out_path)
     print(f"Grid PNG saved: {out_path.name}")
-
 
 def export_grid_pdf_two_column(png_paths: List[Path], out_path: Path, original_filename: str) -> None:
     """
@@ -733,7 +779,7 @@ def slice_and_save_2bars(
     # --- If tail >= 0.5 bar, add one extra final 2-bar slice ---
     # (Avoid duplication if a slice with the same start tick already exists.)
     if tail_ticks >= bar_ticks // 2:
-        extra_start_bar = max(total_bars - 1, 0)     # 마지막 바로부터 2마디
+        extra_start_bar = max(total_bars - 1, 0)
         extra_start_tick = extra_start_bar * bar_ticks
         if not any(st == extra_start_tick for st, _ in slice_starts):
             slice_starts.append((extra_start_tick, extra_start_bar))
@@ -818,7 +864,7 @@ def slice_and_save_2bars(
 
             # Grid detection (straight / triplet-8T / triplet-16T)
             steps_per_bar, grid_label = detect_steps_per_bar_for_pattern(events_by_tick, bar_ticks)
-            cols = steps_per_bar * 2  # 2-bar 기준 칸 수
+            cols = steps_per_bar * 2
 
             print(
                 f"[grid] {basename}: detected grid = {grid_label} "
