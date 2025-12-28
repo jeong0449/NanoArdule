@@ -165,6 +165,40 @@ def sanitize_83(s: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+#  Optional name sequence (override genre/start)
+# ---------------------------------------------------------------------------
+
+def load_name_sequence(def_file: Path) -> List[str]:
+    """
+    Load output base names from a definition file.
+    Format:
+      - One name per line
+      - Blank lines are ignored
+      - Lines starting with '#' are comments
+      - Extensions (.MID/.PNG/.ADT) are allowed and will be stripped
+    Returned names are sanitized to 8.3-safe and uppercased.
+    Example line:
+      RCK_P001
+      CHA_P120.MID
+    """
+    raw = def_file.read_text(encoding='utf-8-sig', errors='replace').splitlines()
+    names: List[str] = []
+    for line in raw:
+        s = line.strip()
+        if not s or s.startswith('#'):
+            continue
+        # strip common extensions
+        s = re.sub(r'\.(mid|midi|png|adt|adp)$', '', s, flags=re.I)
+        s = sanitize_83(s)
+        if not s:
+            continue
+        names.append(s)
+    if not names:
+        raise SystemExit(f"Name definition file is empty: {def_file}")
+    return names
+
+
+# ---------------------------------------------------------------------------
 #  MIDI helpers
 # ---------------------------------------------------------------------------
 
@@ -684,6 +718,7 @@ def slice_and_save_2bars(
     export_grid: bool,
     grid_pdf: bool,
     no_overwrite: bool,
+    name_sequence: Optional[List[str]] = None,
 ) -> None:
     mf = mido.MidiFile(infile)
     if mf.type not in (0, 1):
@@ -711,19 +746,26 @@ def slice_and_save_2bars(
         print("Not enough bars for 2-bar slicing.")
         return
 
-    # genre code
-    if forced_genre:
-        genre = sanitize_83(forced_genre)[:3]
-        print(f"Genre forced: {genre}")
-    else:
-        genre = infer_genre_code_from_name(infile.name)
-        print(f"Genre inferred from filename: {genre}")
 
+    # genre code / naming mode
     out_dir = infile.parent
+
+    if name_sequence is not None:
+        # In name-sequence mode, output basenames come from the definition file.
+        # --genre/--start/--no-overwrite are ignored for naming (kept for backward compatibility).
+        print(f"[names] Name-sequence mode enabled: {len(name_sequence)} name(s) loaded.")
+        genre = "SEQ"
+    else:
+        if forced_genre:
+            genre = sanitize_83(forced_genre)[:3]
+            print(f"Genre forced: {genre}")
+        else:
+            genre = infer_genre_code_from_name(infile.name)
+            print(f"Genre inferred from filename: {genre}")
 
     # --- effective_start_idx for --no-overwrite ---
     effective_start_idx = start_idx
-    if no_overwrite:
+    if name_sequence is None and no_overwrite:
         prefix = genre[:3].upper()
         max_num = 0
         for path in out_dir.glob('*.MID'):
@@ -793,6 +835,7 @@ def slice_and_save_2bars(
 
     # --- create one MIDI file per slice ---
     current_idx = effective_start_idx
+    name_pos = 0  # index into name_sequence (only used when name_sequence is provided)
     grid_png_paths: List[Path] = []
 
     for slice_idx, (start_tick, start_bar) in enumerate(sorted(slice_starts, key=lambda x: x[0])):
@@ -851,10 +894,29 @@ def slice_and_save_2bars(
         tr.append(mido.MetaMessage('end_of_track', time=0))
 
         # output file name
-        pat_idx = current_idx
-        basename = f"{genre[:3]}_P{pat_idx:03d}"
-        basename = sanitize_83(basename)
-        out_path = out_dir / f"{basename}.MID"
+        if name_sequence is not None:
+            # Pick next available name from the provided sequence.
+            # If --no-overwrite is set, skip names that already exist on disk.
+            while True:
+                if name_pos >= len(name_sequence):
+                    raise SystemExit(
+                        f"[names] Not enough names in sequence file: need more than {len(name_sequence)} "
+                        f"(ran out at slice {slice_idx}, bars {start_bar+1}-{start_bar+2})."
+                    )
+                basename = name_sequence[name_pos]
+                name_pos += 1
+
+                out_path = out_dir / f"{basename}.MID"
+                if no_overwrite and out_path.exists():
+                    print(f"[no-overwrite] {out_path.name} exists; skipping this name and trying next.")
+                    continue
+                break
+        else:
+            pat_idx = current_idx
+            basename = f"{genre[:3]}_P{pat_idx:03d}"
+            basename = sanitize_83(basename)
+            out_path = out_dir / f"{basename}.MID"
+
         out.save(out_path)
         print(f"Saved slice {slice_idx} (bars {start_bar+1}-{start_bar+2}) -> {out_path.name}")
 
@@ -877,7 +939,12 @@ def slice_and_save_2bars(
             export_pattern_grid_png(pat_for_grid, title, png_path, cols=cols)
             grid_png_paths.append(png_path)
 
-        current_idx += 1
+        if name_sequence is None:
+            current_idx += 1
+
+    if name_sequence is not None and name_pos < len(name_sequence):
+        remaining = len(name_sequence) - name_pos
+        print(f"[names] Note: {remaining} unused name(s) remain in the sequence file.")
 
     # Collect PNGs into a multi-page PDF (optional) + Ghostscript A4 resize
     if export_grid and grid_pdf and grid_png_paths:
@@ -946,6 +1013,9 @@ def main():
                     help='Starting index (default: 1 => 001).')
     ap.add_argument('--genre', type=str, default=None,
                     help='Force 3-letter genre code (e.g., RCK).')
+    ap.add_argument('--names', type=str, default=None,
+                    help=('Path to a name definition file (one basename per line). '
+                          'If provided, naming follows the file in order and genre inference / --genre are bypassed.'))
     ap.add_argument('--export-grid', action='store_true',
                     help='Export 2-bar drum grids as PNG for each slice.')
     ap.add_argument('--grid-pdf', action='store_true',
@@ -976,6 +1046,14 @@ def main():
             print(f"[GENRE] Inferred from filename '{infile.name}' : {genre}")
         return
 
+
+    name_sequence = None
+    if args.names:
+        def_path = Path(args.names)
+        if not def_path.exists():
+            raise SystemExit(f"Name definition file not found: {def_path}")
+        name_sequence = load_name_sequence(def_path)
+
     slice_and_save_2bars(
         infile,
         start_idx=args.start,
@@ -983,6 +1061,7 @@ def main():
         export_grid=args.export_grid,
         grid_pdf=args.grid_pdf,
         no_overwrite=args.no_overwrite,
+        name_sequence=name_sequence,
     )
 
 
