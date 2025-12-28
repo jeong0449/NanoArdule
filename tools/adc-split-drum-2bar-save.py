@@ -104,7 +104,7 @@ def convert_pdf_to_a4_with_ghostscript(gs_exe: str, input_pdf: Path, output_pdf:
 GENRE_MAP = [
     # Rock / Bossa / Funk / Jazz / Blues / Pop / Ballad
     (re.compile(r'rock', re.I), 'RCK'),
-    (re.compile(r'bossa|bossanova|bosa', re.I), 'BSN'),
+    (re.compile(r'bossa|bossanova|bosa', re.I), 'BOS'),
     (re.compile(r'funk', re.I), 'FNK'),
     (re.compile(r'jazz', re.I), 'JZZ'),
     (re.compile(r'blues?', re.I), 'BLU'),
@@ -113,8 +113,8 @@ GENRE_MAP = [
 
     # Latin + Afro-Cuban + Cha-cha
     (re.compile(r'latin', re.I), 'LAT'),
-    (re.compile(r'afrocub|afro[\s\-_]*cuban', re.I), 'AFC'),   # ← 변경
-    (re.compile(r'chacha|cha[\s\-_]*cha', re.I), 'CHA'),     # ← 변경
+    (re.compile(r'afrocub|afro[\s\-_]*cuban', re.I), 'LAT'),
+    (re.compile(r'chacha|cha[\s\-_]*cha', re.I), 'LAT'),
 
     # Samba / Waltz / Swing / Shuffle / Reggae / Metal
     (re.compile(r'samba', re.I), 'SMB'),
@@ -123,9 +123,6 @@ GENRE_MAP = [
     (re.compile(r'shuffle|shf', re.I), 'SHF'),
     (re.compile(r'reggae', re.I), 'REG'),
     (re.compile(r'metal', re.I), 'MTL'),
-
-    # Boogie (new)
-    (re.compile(r'boogie|bog', re.I), 'BOG'),                 # ← 추가
 
     # Hip-hop
     (re.compile(r'hip\s*-?\s*hop|hiphop|hhp', re.I), 'HHP'),
@@ -140,7 +137,6 @@ GENRE_MAP = [
     (re.compile(r'house|hse', re.I), 'HSE'),
     (re.compile(r'techno|tno', re.I), 'TNO'),
 ]
-
 
 
 def strip_leading_digits(name_noext: str) -> str:
@@ -162,40 +158,6 @@ def sanitize_83(s: str) -> str:
     """Make a string DOS 8.3-safe: alnum + underscore, uppercased."""
     s = re.sub(r'[^A-Za-z0-9_]', '', s).upper()
     return s[:8]
-
-
-# ---------------------------------------------------------------------------
-#  Optional name sequence (override genre/start)
-# ---------------------------------------------------------------------------
-
-def load_name_sequence(def_file: Path) -> List[str]:
-    """
-    Load output base names from a definition file.
-    Format:
-      - One name per line
-      - Blank lines are ignored
-      - Lines starting with '#' are comments
-      - Extensions (.MID/.PNG/.ADT) are allowed and will be stripped
-    Returned names are sanitized to 8.3-safe and uppercased.
-    Example line:
-      RCK_P001
-      CHA_P120.MID
-    """
-    raw = def_file.read_text(encoding='utf-8-sig', errors='replace').splitlines()
-    names: List[str] = []
-    for line in raw:
-        s = line.strip()
-        if not s or s.startswith('#'):
-            continue
-        # strip common extensions
-        s = re.sub(r'\.(mid|midi|png|adt|adp)$', '', s, flags=re.I)
-        s = sanitize_83(s)
-        if not s:
-            continue
-        names.append(s)
-    if not names:
-        raise SystemExit(f"Name definition file is empty: {def_file}")
-    return names
 
 
 # ---------------------------------------------------------------------------
@@ -294,9 +256,9 @@ def detect_steps_per_bar_for_pattern(
 
         score = 0.0
         for t in tick_positions:
-
+            # bar 단위로 나누어 생각
             t_mod = t % bar_ticks
-
+            # 가장 가까운 grid 라인까지 거리
             grid_idx = round(t_mod / step_ticks)
             nearest = grid_idx * step_ticks
             d = t_mod - nearest
@@ -413,24 +375,13 @@ def export_pattern_grid_png(
     cols: int = 32,
 ) -> None:
     """
-    Export a 2-bar drum grid PNG.
+    Export ADP/ADT-style 2-bar drum grid PNG.
 
     X-axis:  cols columns (default 32 = 16 steps/bar)
-
-    Y-axis (12 rows):
-    - Default "base layout" uses these 12 GM drum notes, ordered by MIDI note number
-      (lower note numbers go to lower rows):
-        36, 37, 38, 39, 42, 43, 44, 46, 47, 50, 51, 56
-      (BD, RS, SD, CP, CH, FT(43), PH, OH, MT, HT, RD, CB)
-      These rows always exist (they "occupy a place") when the slice uses only notes
-      from this base set.
-
-    - If the slice contains any drum note outside the base layout:
-      * If distinct notes <= 12: use the slice's own note set (sorted by note number).
-      * If distinct notes  > 12: keep the 12 most frequent notes (tie-break by lower
-        note number), and print a warning listing kept/dropped notes.
-
-    In all cases, the displayed row order is "lower note number at the bottom".
+    Y-axis:  12 rows:
+       - top:  OTHER note rows (each note number is a label)
+       - bottom: drum slots (slot index 0..11, labels in SLOT_LABELS,
+                 BD at the very bottom).
     """
     if not PIL_AVAILABLE:
         print(f"[WARN] Pillow not available; cannot export grid for {out_path.name}")
@@ -440,98 +391,56 @@ def export_pattern_grid_png(
     if L <= 0:
         return
 
-    # ---- 1) Count note occurrences from this slice (events_by_tick: rel_tick -> set(notes)) ----
-    from collections import Counter
-    note_counts: Counter[int] = Counter()
+    # 1) analyze used slots / other notes
+    used_slots: Set[int] = set()
+    other_notes_set: Set[int] = set()
+
     for notes in pattern.events_by_tick.values():
         for nt in notes:
-            note_counts[nt] += 1
+            sl = note_to_slot(nt)
+            if sl is None or sl < 0 or sl >= N_SLOTS:
+                other_notes_set.add(nt)
+            else:
+                used_slots.add(sl)
 
-    if not note_counts:
-        return
+    used_slots_sorted = sorted(used_slots)
+    other_notes_sorted = sorted(other_notes_set)
 
-    # ---- 2) Decide which 12 notes occupy the rows ----
-    BASE_NOTES = [36, 37, 38, 39, 42, 43, 44, 46, 47, 50, 51, 56]
-    base_set = set(BASE_NOTES)
-    used_notes = set(note_counts.keys())
+    # 2) row allocation
+    free_rows = max(0, N_SLOTS - len(used_slots_sorted))
+    n_others_to_show = min(len(other_notes_sorted), free_rows)
+    shown_others = other_notes_sorted[:n_others_to_show]
 
-    if used_notes.issubset(base_set):
-        # Use the fixed base layout (always occupies rows)
-        selected_notes = sorted(BASE_NOTES)
-        dropped_items = []
-        kept_items = [(n, note_counts.get(n, 0)) for n in selected_notes]
-    else:
-        # Use the slice's note set (or top-12) when it differs from the base layout
-        items = sorted(note_counts.items(), key=lambda kv: (-kv[1], kv[0]))
-        if len(items) > 12:
-            kept_items = items[:12]
-            dropped_items = items[12:]
-            kept_str = ", ".join([f"{n}({c})" for n, c in kept_items])
-            dropped_str = ", ".join([f"{n}({c})" for n, c in dropped_items])
-            print(f"[WARN] {out_path.stem}: >12 notes used; keeping top 12, dropping {len(dropped_items)} note(s).")
-            print(f"       kept   : {kept_str}")
-            print(f"       dropped: {dropped_str}")
+    slot_row_quota = N_SLOTS - n_others_to_show
+
+    unused_slots_sorted = sorted(set(range(N_SLOTS)) - set(used_slots_sorted))
+    extra_slots_needed = max(0, slot_row_quota - len(used_slots_sorted))
+    extra_slots = unused_slots_sorted[:extra_slots_needed]
+
+    slot_rows_all = used_slots_sorted + extra_slots
+    slot_rows_for_display = sorted(slot_rows_all, reverse=True)  # BD at bottom
+
+    row_types: List[Tuple[str, int]] = []
+    row_labels: List[str] = []
+
+    for note in shown_others:
+        row_types.append(('other', note))
+        row_labels.append(str(note))
+
+    for sl in slot_rows_for_display:
+        row_types.append(('slot', sl))
+        if 0 <= sl < len(SLOT_LABELS):
+            row_labels.append(SLOT_LABELS[sl])
         else:
-            kept_items = items
-            dropped_items = []
+            row_labels.append(f"S{sl}")
 
-        selected_notes = sorted([n for n, _ in kept_items])
+    rows = len(row_types)
+    if rows == 0:
+        rows = 1
+        row_types = []
+        row_labels = ["(empty)"]
 
-    selected_set = set(selected_notes)
-
-    # ---- 3) Abbreviation mapping (GM-oriented, with fallback) ----
-    GM_ABBR = {
-    35: "KK", 36: "KK",        # Kick / Bass Drum
-    37: "RM",                  # Rim / Side Stick
-    38: "SN", 40: "SN",        # Snare
-    39: "CL",                  # Clap
-    42: "CH",                  # Closed Hi-Hat
-    44: "PH",                  # Pedal Hi-Hat
-    46: "OH",                  # Open Hi-Hat
-    
-    41: "LT", 43: "LT",        # Low / Floor Tom
-    45: "LT",
-    47: "MT",                  # Mid Tom
-    48: "MT",
-    50: "HT",                  # High Tom
-    
-    49: "CR", 52: "CR", 55: "CR", 57: "CR",   # Crash
-    51: "RD", 53: "RD", 59: "RD",             # Ride
-    56: "CB",                                   # Cowbell
-    }
-
-
-
-    def abbr_for_note(n: int) -> str:
-        a = GM_ABBR.get(n)
-        if a:
-            return a
-        return f"N{n}"
-
-    # ---- 4) Build rows (always 12) ----
-    # Display order:
-    #  - If the MIDI uses the base 12-note set, use the grouped APS order (top->bottom).
-    #  - Otherwise, keep numeric ordering (higher notes at the top).
-    DISPLAY_ORDER_NOTES = [56, 51, 50, 47, 43, 46, 44, 42, 39, 38, 37, 36]
-    if selected_set == base_set:
-        ordered_notes = [n for n in DISPLAY_ORDER_NOTES if n in selected_set]
-    else:
-        ordered_notes = list(reversed(sorted(selected_notes)))
-
-    # If fewer than 12 notes are selected, pad at the top (higher rows) with '--'.
-    pad = max(0, 12 - len(ordered_notes))
-    row_notes_display = [None] * pad + ordered_notes
-
-    row_labels: List[str] = [("--" if n is None else abbr_for_note(n)) for n in row_notes_display]
-    rows = len(row_notes_display)
-
-    # Map note -> row index
-    row_index_for_note: Dict[int, int] = {}
-    for idx, n in enumerate(row_notes_display):
-        if n is not None:
-            row_index_for_note[n] = idx
-
-    # ---- 5) image geometry ----
+    # 3) image geometry
     cell_w = 10
     cell_h = 10
     left_margin = 40
@@ -554,12 +463,13 @@ def export_pattern_grid_png(
     except Exception:
         font_label = font_title
 
-    # ---- 6) title centered ----
+    # 4) title centered
     if hasattr(draw, "textbbox"):
         bbox = draw.textbbox((0, 0), title, font=font_title)
         text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
     else:
-        text_w, _ = draw.textsize(title, font=font_title)
+        text_w, text_h = draw.textsize(title, font=font_title)
 
     title_x = (width - text_w) // 2
     title_y = 5
@@ -568,7 +478,7 @@ def export_pattern_grid_png(
     gx = left_margin
     gy = top_margin
 
-    # ---- 7) vertical grid lines (bar / beat) ----
+    # 5) vertical grid lines (bar / beat)
     cols_per_bar = cols // 2
     beat_step = cols_per_bar // 4 if cols_per_bar >= 4 else 1
 
@@ -592,12 +502,21 @@ def export_pattern_grid_png(
         y = gy + r * cell_h
         draw.line((gx, y, gx + cols * cell_w, y), fill=(220, 220, 220))
 
-    # ---- 8) row headers ----
+    # 6) row headers
     for idx, label in enumerate(row_labels):
         y = gy + idx * cell_h + 2
         draw.text((5, y), label, fill=(0, 0, 0), font=font_label)
 
-    # ---- 9) events ----
+    # 7) row index maps
+    row_index_for_slot: Dict[int, int] = {}
+    row_index_for_other: Dict[int, int] = {}
+    for idx, (kind, val) in enumerate(row_types):
+        if kind == 'slot':
+            row_index_for_slot[val] = idx
+        else:
+            row_index_for_other[val] = idx
+
+    # 8) events
     ticks_per_col = L / cols if cols > 0 else 1.0
     for t, notes in pattern.events_by_tick.items():
         col = int(round(t / ticks_per_col)) if ticks_per_col > 0 else 0
@@ -605,14 +524,14 @@ def export_pattern_grid_png(
             col = 0
         if col >= cols:
             col = cols - 1
-
         for nt in notes:
-            if nt not in selected_set:
+            sl = note_to_slot(nt)
+            if sl is not None and sl in row_index_for_slot:
+                row = row_index_for_slot[sl]
+            elif nt in row_index_for_other:
+                row = row_index_for_other[nt]
+            else:
                 continue
-            row = row_index_for_note.get(nt)
-            if row is None:
-                continue
-
             x0 = gx + col * cell_w + 1
             y0 = gy + row * cell_h + 1
             x1 = x0 + cell_w - 2
@@ -622,11 +541,19 @@ def export_pattern_grid_png(
     img.save(out_path)
     print(f"Grid PNG saved: {out_path.name}")
 
+
 def export_grid_pdf_two_column(png_paths: List[Path], out_path: Path, original_filename: str) -> None:
     """
-    Collect PNGs into a high-resolution PDF.
-    Each page shows a centered title: "Original MIDI: <filename>".
-    If Ghostscript is available, pages can be resized to A4 (595x842 pt).
+    Collect grid PNGs into a high-resolution PDF.
+
+    NOTE: Layout is forced to a fixed 2x5 grid per page (10 images/page) to avoid
+    cropping/overlap when PNG aspect ratios differ.
+
+    Design goal:
+    - Make the PDF page title clearly larger than the per-grid (PNG-embedded) titles.
+    - Do NOT touch PNG generation logic; instead:
+        * Increase PDF title font size
+        * Add a small padding by scaling PNGs slightly smaller inside each slot
     """
     if not PIL_AVAILABLE:
         print(f"[WARN] Pillow not available; cannot export PDF {out_path.name}")
@@ -637,74 +564,109 @@ def export_grid_pdf_two_column(png_paths: List[Path], out_path: Path, original_f
 
     # Large canvas approximating A4 at ~300 DPI (portrait)
     A4_W, A4_H = 2480, 3508
+    PDF_RESOLUTION = 300  # px/in -> maps A4 pixels to ~595x842 pt in PDF viewers
 
-    margin_top = 180       # top margin (space for title)
-    margin_side = 120      # left/right margin
+    # Page layout (2x5)
+    cols, rows = 2, 5
+    margin_side = 120
+
+    # Title area: increased to accommodate a larger font
+    title_y = 100  # slightly larger top margin
+    title_font_size = 64  # was 40; larger page title
+    title_gap_below = 60  # gap from title baseline area to the first row of images
+
+    margin_top = title_y + title_font_size + title_gap_below
     margin_bottom = 120
-    inner_margin = 40      # gap between columns / rows
-    cols_per_page = 2
+    inner_margin = 24    # gap between slots (narrower grid spacing)
 
-    col_width = (A4_W - 2 * margin_side - inner_margin) // cols_per_page
+    # Slightly shrink images inside slots so the PNG-embedded titles feel smaller
+    # relative to the page title (without modifying PNG generation).
+    image_scale = 0.92   # 0.88~0.95 are reasonable
 
-    # Title font
-    try:
-        font_title = ImageFont.truetype("arial.ttf", 48)
-    except Exception:
+    # Title font: try Windows Arial Bold first, then DejaVuSans, then fallback.
+    font_title = None
+    for cand in [
+        r"C:\Windows\Fonts\arialbd.ttf",
+        r"C:\Windows\Fonts\arial.ttf",
+        "DejaVuSans-Bold.ttf",
+        "DejaVuSans.ttf",
+    ]:
+        try:
+            font_title = ImageFont.truetype(cand, title_font_size)
+            break
+        except Exception:
+            pass
+    if font_title is None:
         font_title = ImageFont.load_default()
 
-    pages = []
-    page = Image.new("RGB", (A4_W, A4_H), "white")
-    draw = ImageDraw.Draw(page)
-
     title_text = f"Original MIDI: {original_filename}"
-    if hasattr(draw, "textbbox"):
-        bbox = draw.textbbox((0, 0), title_text, font=font_title)
-        title_w = bbox[2] - bbox[0]
-        title_h = bbox[3] - bbox[1]
-    else:
-        title_w, title_h = draw.textsize(title_text, font=font_title)
 
-    draw.text(((A4_W - title_w) // 2, 60), title_text, fill=(0, 0, 0), font=font_title)
+    usable_w = A4_W - 2 * margin_side - (cols - 1) * inner_margin
+    usable_h = A4_H - margin_top - margin_bottom - (rows - 1) * inner_margin
+    slot_w = usable_w // cols
+    slot_h = usable_h // rows
 
-    x = margin_side
-    y = margin_top
+    pages: List[Image.Image] = []
+
+    def _new_page() -> Image.Image:
+        page = Image.new("RGB", (A4_W, A4_H), "white")
+        draw = ImageDraw.Draw(page)
+
+        # Centered title near the top
+        try:
+            bbox = draw.textbbox((0, 0), title_text, font=font_title)
+            title_w = bbox[2] - bbox[0]
+        except Exception:
+            title_w, _ = draw.textsize(title_text, font=font_title)
+
+        draw.text(((A4_W - title_w) // 2, title_y), title_text, fill=(0, 0, 0), font=font_title)
+        return page
+
+    page = _new_page()
+
+    per_page = cols * rows
+    placed = 0  # count successfully placed images (so failures don't leave blank slots)
 
     for p in png_paths:
+        # Start a new page every 10 successfully placed images
+        if placed > 0 and (placed % per_page) == 0:
+            pages.append(page)
+            page = _new_page()
+
         try:
             img = Image.open(p).convert("RGB")
         except Exception as e:
-            print(f"[WARN] Failed to open {p}: {e}")
+            print(f"[WARN] Failed to open {p.name}: {e}")
             continue
 
-        w, h = img.size
-        scale = col_width / float(w)
-        new_h = int(h * scale)
-        img = img.resize((col_width, new_h), Image.LANCZOS)
+        # Compute slot position on current page
+        idx = placed % per_page
+        r = idx // cols
+        c = idx % cols
 
-        # Start a new page if there is not enough vertical space
-        if y + new_h > A4_H - margin_bottom:
-            pages.append(page)
-            page = Image.new("RGB", (A4_W, A4_H), "white")
-            draw = ImageDraw.Draw(page)
-            # Redraw page title
-            draw.text(((A4_W - title_w) // 2, 60), title_text, fill=(0, 0, 0), font=font_title)
-            x = margin_side
-            y = margin_top
+        # Fit image into slot (preserve aspect ratio), then apply padding scale
+        w, h = img.size
+        base_scale = min(slot_w / float(w), slot_h / float(h))
+        scale = base_scale * image_scale
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+
+        # Center within slot
+        x0 = margin_side + c * (slot_w + inner_margin)
+        y0 = margin_top + r * (slot_h + inner_margin)
+        x = x0 + (slot_w - new_w) // 2
+        y = y0 + (slot_h - new_h) // 2
 
         page.paste(img, (x, y))
-
-        # Next position: other column in the same row, or next row
-        if x == margin_side:
-            x = margin_side + col_width + inner_margin
-        else:
-            x = margin_side
-            y += new_h + inner_margin
+        placed += 1
 
     pages.append(page)
 
     first, *rest = pages
-    first.save(out_path, save_all=True, append_images=rest)
-    print(f"[grid-pdf] Saved high-res two-column PDF: {out_path.name}")
+    first.save(out_path, save_all=True, append_images=rest, resolution=PDF_RESOLUTION)
+    print(f"[grid-pdf] Saved high-res 2x5 PDF: {out_path.name}")
+
 
 
 # ---------------------------------------------------------------------------
@@ -718,7 +680,6 @@ def slice_and_save_2bars(
     export_grid: bool,
     grid_pdf: bool,
     no_overwrite: bool,
-    name_sequence: Optional[List[str]] = None,
 ) -> None:
     mf = mido.MidiFile(infile)
     if mf.type not in (0, 1):
@@ -746,26 +707,19 @@ def slice_and_save_2bars(
         print("Not enough bars for 2-bar slicing.")
         return
 
-
-    # genre code / naming mode
-    out_dir = infile.parent
-
-    if name_sequence is not None:
-        # In name-sequence mode, output basenames come from the definition file.
-        # --genre/--start/--no-overwrite are ignored for naming (kept for backward compatibility).
-        print(f"[names] Name-sequence mode enabled: {len(name_sequence)} name(s) loaded.")
-        genre = "SEQ"
+    # genre code
+    if forced_genre:
+        genre = sanitize_83(forced_genre)[:3]
+        print(f"Genre forced: {genre}")
     else:
-        if forced_genre:
-            genre = sanitize_83(forced_genre)[:3]
-            print(f"Genre forced: {genre}")
-        else:
-            genre = infer_genre_code_from_name(infile.name)
-            print(f"Genre inferred from filename: {genre}")
+        genre = infer_genre_code_from_name(infile.name)
+        print(f"Genre inferred from filename: {genre}")
+
+    out_dir = infile.parent
 
     # --- effective_start_idx for --no-overwrite ---
     effective_start_idx = start_idx
-    if name_sequence is None and no_overwrite:
+    if no_overwrite:
         prefix = genre[:3].upper()
         max_num = 0
         for path in out_dir.glob('*.MID'):
@@ -821,7 +775,7 @@ def slice_and_save_2bars(
     # --- If tail >= 0.5 bar, add one extra final 2-bar slice ---
     # (Avoid duplication if a slice with the same start tick already exists.)
     if tail_ticks >= bar_ticks // 2:
-        extra_start_bar = max(total_bars - 1, 0)
+        extra_start_bar = max(total_bars - 1, 0)     # 마지막 바로부터 2마디
         extra_start_tick = extra_start_bar * bar_ticks
         if not any(st == extra_start_tick for st, _ in slice_starts):
             slice_starts.append((extra_start_tick, extra_start_bar))
@@ -835,7 +789,6 @@ def slice_and_save_2bars(
 
     # --- create one MIDI file per slice ---
     current_idx = effective_start_idx
-    name_pos = 0  # index into name_sequence (only used when name_sequence is provided)
     grid_png_paths: List[Path] = []
 
     for slice_idx, (start_tick, start_bar) in enumerate(sorted(slice_starts, key=lambda x: x[0])):
@@ -894,29 +847,10 @@ def slice_and_save_2bars(
         tr.append(mido.MetaMessage('end_of_track', time=0))
 
         # output file name
-        if name_sequence is not None:
-            # Pick next available name from the provided sequence.
-            # If --no-overwrite is set, skip names that already exist on disk.
-            while True:
-                if name_pos >= len(name_sequence):
-                    raise SystemExit(
-                        f"[names] Not enough names in sequence file: need more than {len(name_sequence)} "
-                        f"(ran out at slice {slice_idx}, bars {start_bar+1}-{start_bar+2})."
-                    )
-                basename = name_sequence[name_pos]
-                name_pos += 1
-
-                out_path = out_dir / f"{basename}.MID"
-                if no_overwrite and out_path.exists():
-                    print(f"[no-overwrite] {out_path.name} exists; skipping this name and trying next.")
-                    continue
-                break
-        else:
-            pat_idx = current_idx
-            basename = f"{genre[:3]}_P{pat_idx:03d}"
-            basename = sanitize_83(basename)
-            out_path = out_dir / f"{basename}.MID"
-
+        pat_idx = current_idx
+        basename = f"{genre[:3]}_P{pat_idx:03d}"
+        basename = sanitize_83(basename)
+        out_path = out_dir / f"{basename}.MID"
         out.save(out_path)
         print(f"Saved slice {slice_idx} (bars {start_bar+1}-{start_bar+2}) -> {out_path.name}")
 
@@ -926,7 +860,7 @@ def slice_and_save_2bars(
 
             # Grid detection (straight / triplet-8T / triplet-16T)
             steps_per_bar, grid_label = detect_steps_per_bar_for_pattern(events_by_tick, bar_ticks)
-            cols = steps_per_bar * 2
+            cols = steps_per_bar * 2  # 2-bar 기준 칸 수
 
             print(
                 f"[grid] {basename}: detected grid = {grid_label} "
@@ -939,12 +873,7 @@ def slice_and_save_2bars(
             export_pattern_grid_png(pat_for_grid, title, png_path, cols=cols)
             grid_png_paths.append(png_path)
 
-        if name_sequence is None:
-            current_idx += 1
-
-    if name_sequence is not None and name_pos < len(name_sequence):
-        remaining = len(name_sequence) - name_pos
-        print(f"[names] Note: {remaining} unused name(s) remain in the sequence file.")
+        current_idx += 1
 
     # Collect PNGs into a multi-page PDF (optional) + Ghostscript A4 resize
     if export_grid and grid_pdf and grid_png_paths:
@@ -1013,9 +942,6 @@ def main():
                     help='Starting index (default: 1 => 001).')
     ap.add_argument('--genre', type=str, default=None,
                     help='Force 3-letter genre code (e.g., RCK).')
-    ap.add_argument('--names', type=str, default=None,
-                    help=('Path to a name definition file (one basename per line). '
-                          'If provided, naming follows the file in order and genre inference / --genre are bypassed.'))
     ap.add_argument('--export-grid', action='store_true',
                     help='Export 2-bar drum grids as PNG for each slice.')
     ap.add_argument('--grid-pdf', action='store_true',
@@ -1046,14 +972,6 @@ def main():
             print(f"[GENRE] Inferred from filename '{infile.name}' : {genre}")
         return
 
-
-    name_sequence = None
-    if args.names:
-        def_path = Path(args.names)
-        if not def_path.exists():
-            raise SystemExit(f"Name definition file not found: {def_path}")
-        name_sequence = load_name_sequence(def_path)
-
     slice_and_save_2bars(
         infile,
         start_idx=args.start,
@@ -1061,7 +979,6 @@ def main():
         export_grid=args.export_grid,
         grid_pdf=args.grid_pdf,
         no_overwrite=args.no_overwrite,
-        name_sequence=name_sequence,
     )
 
 
