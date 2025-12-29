@@ -106,7 +106,7 @@ def convert_pdf_to_a4_with_ghostscript(gs_exe: str, input_pdf: Path, output_pdf:
 GENRE_MAP = [
     # Rock / Bossa / Funk / Jazz / Blues / Pop / Ballad
     (re.compile(r'rock', re.I), 'RCK'),
-    (re.compile(r'bossa|bossanova|bosa', re.I), 'BOS'),
+    (re.compile(r'bossa|bossanova|bosa', re.I), 'BNV'),
     (re.compile(r'funk', re.I), 'FNK'),
     (re.compile(r'jazz', re.I), 'JZZ'),
     (re.compile(r'blues?', re.I), 'BLU'),
