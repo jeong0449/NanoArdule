@@ -23,6 +23,8 @@ Tail handling rule
 
 import argparse
 import re
+import csv
+import io
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
@@ -113,7 +115,7 @@ GENRE_MAP = [
 
     # Latin + Afro-Cuban + Cha-cha
     (re.compile(r'latin', re.I), 'LAT'),
-    (re.compile(r'afrocub|afro[\s\-_]*cuban', re.I), 'LAT'),
+    (re.compile(r'afrocub|afrocuba[n]?|afro[\s\-_]*cuba[n]?', re.I), 'AFC'),
     (re.compile(r'chacha|cha[\s\-_]*cha', re.I), 'LAT'),
 
     # Samba / Waltz / Swing / Shuffle / Reggae / Metal
@@ -158,6 +160,98 @@ def sanitize_83(s: str) -> str:
     """Make a string DOS 8.3-safe: alnum + underscore, uppercased."""
     s = re.sub(r'[^A-Za-z0-9_]', '', s).upper()
     return s[:8]
+
+
+
+
+# ---------------------------------------------------------------------------
+#  Optional output naming override (--names)
+# ---------------------------------------------------------------------------
+
+def load_names_file_csv(path: Path) -> dict[int, str]:
+    """Load a CSV naming override file.
+
+    Required columns (recommended header):
+      - index : integer pattern index (the NNN in *_PNNN.MID)
+      - name  : desired base filename (will be sanitized to DOS 8.3 and uppercased)
+
+    Notes
+    - The CSV MAY include a header row. If the header is missing, the first two
+      columns are interpreted as (index, name).
+    - Additional columns MAY be present and will be ignored.
+    - Blank lines are ignored.
+    - Lines starting with '#' are ignored (after leading whitespace).
+
+    Example:
+        index,name
+        1,AFC_A
+        2,AFC_B
+        12,AFC_BRK1
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise SystemExit(f"Failed to read --names file: {path} ({e})")
+
+    # Support comment-only lines (CSV itself doesn't define comments)
+    cleaned_lines: list[str] = []
+    for ln in raw.splitlines():
+        s = ln.lstrip()
+        if not s:
+            continue
+        if s.startswith("#"):
+            continue
+        cleaned_lines.append(ln)
+    cleaned = "\n".join(cleaned_lines)
+
+    names_map: dict[int, str] = {}
+
+    # Try header-based CSV first
+    f = io.StringIO(cleaned)
+    reader = csv.DictReader(f)
+    if reader.fieldnames:
+        field_lut = {h.strip().lower(): h for h in reader.fieldnames if h}
+        if "index" in field_lut and "name" in field_lut:
+            idx_key = field_lut["index"]
+            name_key = field_lut["name"]
+            for row in reader:
+                if not row:
+                    continue
+                idx_raw = (row.get(idx_key) or "").strip()
+                name_raw = (row.get(name_key) or "").strip()
+                if not idx_raw or not name_raw:
+                    continue
+                try:
+                    idx = int(idx_raw)
+                except ValueError:
+                    raise SystemExit(f"Invalid index in --names CSV: {idx_raw!r} (file: {path})")
+                names_map[idx] = name_raw
+            return names_map
+
+    # Fallback: no header -> first two columns are (index, name)
+    f2 = io.StringIO(cleaned)
+    reader2 = csv.reader(f2)
+    for row in reader2:
+        if not row or len(row) < 2:
+            continue
+        idx_raw = str(row[0]).strip()
+        name_raw = str(row[1]).strip()
+        if not idx_raw or not name_raw:
+            continue
+        try:
+            idx = int(idx_raw)
+        except ValueError:
+            raise SystemExit(f"Invalid index in --names CSV: {idx_raw!r} (file: {path})")
+        names_map[idx] = name_raw
+
+    return names_map
+
+
+def choose_basename_csv(default_basename: str, pat_idx: int, names_map: dict[int, str]) -> str:
+    """Choose output basename using optional CSV overrides."""
+    if pat_idx in names_map:
+        return sanitize_83(names_map[pat_idx])
+    return sanitize_83(default_basename)
 
 
 # ---------------------------------------------------------------------------
@@ -571,9 +665,9 @@ def export_grid_pdf_two_column(png_paths: List[Path], out_path: Path, original_f
     margin_side = 120
 
     # Title area: increased to accommodate a larger font
-    title_y = 100  # slightly larger top margin
+    title_y = 140  # slightly larger top margin
     title_font_size = 64  # was 40; larger page title
-    title_gap_below = 60  # gap from title baseline area to the first row of images
+    title_gap_below = 20  # gap from title baseline area to the first row of images
 
     margin_top = title_y + title_font_size + title_gap_below
     margin_bottom = 120
@@ -680,6 +774,7 @@ def slice_and_save_2bars(
     export_grid: bool,
     grid_pdf: bool,
     no_overwrite: bool,
+    names_file: Optional[Path] = None,
 ) -> None:
     mf = mido.MidiFile(infile)
     if mf.type not in (0, 1):
@@ -716,6 +811,14 @@ def slice_and_save_2bars(
         print(f"Genre inferred from filename: {genre}")
 
     out_dir = infile.parent
+
+    # Optional naming override CSV file
+    names_map: dict[int, str] = {}
+    if names_file is not None:
+        if not names_file.exists():
+            raise SystemExit(f"--names file not found: {names_file}")
+        names_map = load_names_file_csv(names_file)
+        print(f"[names] Loaded {len(names_map)} name mapping(s) from {names_file.name}")
 
     # --- effective_start_idx for --no-overwrite ---
     effective_start_idx = start_idx
@@ -848,8 +951,8 @@ def slice_and_save_2bars(
 
         # output file name
         pat_idx = current_idx
-        basename = f"{genre[:3]}_P{pat_idx:03d}"
-        basename = sanitize_83(basename)
+        default_basename = f"{genre[:3]}_P{pat_idx:03d}"
+        basename = choose_basename_csv(default_basename=default_basename, pat_idx=pat_idx, names_map=names_map)
         out_path = out_dir / f"{basename}.MID"
         out.save(out_path)
         print(f"Saved slice {slice_idx} (bars {start_bar+1}-{start_bar+2}) -> {out_path.name}")
@@ -942,6 +1045,9 @@ def main():
                     help='Starting index (default: 1 => 001).')
     ap.add_argument('--genre', type=str, default=None,
                     help='Force 3-letter genre code (e.g., RCK).')
+    ap.add_argument('--names', type=str, default=None,
+                    help='Optional CSV naming override file with columns index,name. '
+                         'Index corresponds to output PNNN. Additional columns are ignored.')
     ap.add_argument('--export-grid', action='store_true',
                     help='Export 2-bar drum grids as PNG for each slice.')
     ap.add_argument('--grid-pdf', action='store_true',
@@ -979,6 +1085,7 @@ def main():
         export_grid=args.export_grid,
         grid_pdf=args.grid_pdf,
         no_overwrite=args.no_overwrite,
+        names_file=(Path(args.names) if args.names else None),
     )
 
 
