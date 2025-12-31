@@ -256,5 +256,6 @@ Detailed documentation is organized by topic under the `docs/` directory.
 - [ADT v2.2a specification](./specs/ADT_v2.2a.md)
 - [ADP specification](./specs/ADP_specification.md)
 - [ADC toolchain manuals]
+- [Design Trade-offs in ADP: Fixed Steps and 2-Bar Patterns](./docs/ADP_design_tradeoffs.md)
 
 > Some documents are placeholders and will be expanded in future updates.
