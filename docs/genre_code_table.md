@@ -5,30 +5,32 @@ The slicer script infers the code from the input MIDI filename using simple keyw
 
 > Note: These codes are used for **naming and indexing** only. They do not affect MIDI content.
 
-## Genre codes
+## Genre Codes
 
 | Code | Full name |
-|---|---|
-| `RCK` | Rock |
-| `BOS` | Bossa Nova |
-| `FNK` | Funk |
-| `JZZ` | Jazz |
-| `BLU` | Blues |
-| `POP` | Pop |
-| `BAL` | Ballad |
-| `LAT` | Latin / Afro-Cuban / Cha-cha |
-| `SMB` | Samba |
-| `WLZ` | Waltz |
-| `SWG` | Swing |
-| `SHF` | Shuffle |
-| `REG` | Reggae |
-| `MTL` | Metal |
-| `HHP` | Hip-Hop |
-| `RNB` | R&B (Rhythm & Blues) |
-| `EDM` | EDM / Dance |
-| `HSE` | House |
-| `TNO` | Techno |
-| `DRM` | Drums (default / fallback) |
+|------|-----------|
+| RCK  | Rock |
+| BNV  | Bossa Nova |
+| FNK  | Funk |
+| JZZ  | Jazz |
+| BLU  | Blues |
+| POP  | Pop |
+| BAL  | Ballad |
+| LAT  | Latin / Cha-cha-cha |
+| AFC  | Afro-Cuban |
+| SMB  | Samba |
+| WLZ  | Waltz |
+| SWG  | Swing |
+| SHF  | Shuffle |
+| REG  | Reggae |
+| MTL  | Metal |
+| HHP  | Hip-Hop |
+| RNB  | R&B (Rhythm & Blues) |
+| EDM  | EDM / Dance |
+| HSE  | House |
+| TNO  | Techno |
+| DRM  | Drums (default / fallback) |
+
 
 ## Where this comes from
 
