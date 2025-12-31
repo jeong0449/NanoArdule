@@ -28,6 +28,7 @@ While this approach produces mechanically valid ADP patterns, it can distort the
 The following image illustrates a case in which a 3/4 waltz section contained in the final part of the file `6MISC.MID` was incorrectly segmented as a 4/4 pattern. Even if ADC is improved to accommodate triple meter, this file would still require manual review because the original MIDI file does not contain explicit time signature change information (4/4 → 3/4).
 
 <img src="../images/Mis-segmented_3-4_Waltz.png" width="600" alt="Flam Misinterpreted as 16th-Note Triplet">
+
 ---
 
 ## Flam Representation and Triplet Approximation
