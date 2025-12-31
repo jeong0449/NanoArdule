@@ -25,6 +25,9 @@ When analyzing MIDI files that contain waltz-like material but lack explicit tim
 
 While this approach produces mechanically valid ADP patterns, it can distort the original rhythmic intent. Musical correctness is sacrificed in favor of structural compatibility, and this limitation is explicitly acknowledged.
 
+The following image illustrates a case in which a 3/4 waltz section contained in the final part of the file `6MISC.MID` was incorrectly segmented as a 4/4 pattern. Even if ADC is improved to accommodate triple meter, this file would still require manual review because the original MIDI file does not contain explicit time signature change information (4/4 → 3/4).
+
+<img src="../images/Mis-segmented_3-4_Waltz.png" width="600" alt="Waltz Patterns Under a Fixed 4/4 Segmentation Model">
 ---
 
 ## Flam Representation and Triplet Approximation
