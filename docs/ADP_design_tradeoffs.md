@@ -41,7 +41,12 @@ As a result, patterns containing flams often sound more rigid and quantized than
 
 Certain rhythmic styles, such as blues and shuffle-based grooves, naturally align with 24-step or triplet-oriented grids.
 
-Although such patterns can be detected during analysis, the current APS step sequencer does not yet support editing or visualization of 24-step patterns. Consequently, these patterns cannot be interactively refined within the step sequencer and must either be simplified, converted, or excluded from step-based editing workflows.
+Although such patterns can be detected during analysis, the current APS step sequencer does not yet support **interactive editing or visualization** of 24-step patterns.
+
+Importantly, this limitation applies only to step-based editing. **Playback of 24-step patterns within APS is fully supported and functions as expected.**
+
+As a result, these patterns cannot be refined using the step sequencer interface and must either be simplified, converted, or excluded from step-based editing workflows, even though they remain playable within the APS environment.
+
 
 ---
 
