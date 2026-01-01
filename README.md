@@ -107,6 +107,7 @@ python .\tools\adc-split-drum-2bar-save.py .\6AFROCUB.MID --genre LAT --export-g
 python .\tools\adc-split-drum-2bar-save.py --print-genre-only .\6AFROCUB.MID
 python .\tools\adc-mid2adt.py --in-dir MID --out-dir ADT
 python .\tools\adc-adt2adp.py --in-dir ADT --out-dir ADP
+python .\tools\adc-mkindex.py --patterns .\ADP --out ..\SD\SYSTEM
 ```
 
 ---
