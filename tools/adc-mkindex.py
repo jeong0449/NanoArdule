@@ -22,7 +22,7 @@ Notes
 """
 
 
-import argparse, pathlib, sys, struct, datetime, collections
+import argparse, pathlib, sys, struct, datetime, collections, re
 
 ADP_MAGIC = b"ADP2"
 ADP_VERSION = 22
@@ -55,11 +55,36 @@ def genre_from_name(stem: str) -> str:
     g = stem.split('_', 1)[0].upper() if '_' in stem else stem[:3].upper()
     if not g: g = "ETC"
     return g[:3]
+    
+def sort_key_for_index(p: pathlib.Path):
+    """
+    Sort by:
+      1) GENRE = first 3 letters (same rule as genre_from_name)
+      2) Pattern number = 3 digits after '_' (ignore P/B/etc.)
+         Examples:
+           RCK_P001.ADP -> 1
+           RCK_B012.ADP -> 12
+    """
+    stem = p.stem
+    gen = genre_from_name(stem)
+
+    num = 999999  # fallback for unexpected names
+    if "_" in stem:
+        tail = stem.split("_", 1)[1]
+        m = re.match(r"^[A-Za-z]?(\d{3})", tail)
+        if m:
+            num = int(m.group(1))
+
+    return (gen, num, p.name.upper())   
 
 def main():
     ap = argparse.ArgumentParser(description="Scan ADP v2.2 files and generate /SYSTEM/INDEX.TXT")
     ap.add_argument("--patterns", required=True, help="Path to the /PATTERNS directory containing .ADP files")
-    ap.add_argument("--out", required=True, help="Output path for the generated INDEX.TXT")
+    ap.add_argument(
+        "--out",
+        required=True,
+        help="Directory where INDEX.TXT will be written"
+    )
     ap.add_argument("--recursive", action="store_true", help="Scan subdirectories recursively")
     ap.add_argument("--root", default="/PATTERNS", help="Root path label written into the INDEX header (default: /PATTERNS)")
     args = ap.parse_args()
@@ -82,7 +107,7 @@ def main():
     rows = []
     genre_counts = collections.Counter()
 
-    for p in sorted(files, key=lambda x: x.name.upper()):
+    for p in sorted(files, key=sort_key_for_index):
         try:
             hdr = read_adp_header(p)
         except Exception as e:
@@ -108,9 +133,11 @@ def main():
         })
 
     # write index
-    outp = pathlib.Path(args.out)
-    outp.parent.mkdir(parents=True, exist_ok=True)
+    outdir = pathlib.Path(args.out)
+    outdir.mkdir(parents=True, exist_ok=True)
+    outp = outdir / "INDEX.TXT"
     ts = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    
     total = sum(genre_counts.values())
     genresum = ", ".join(f"{k}:{v}" for k,v in sorted(genre_counts.items()))
 
