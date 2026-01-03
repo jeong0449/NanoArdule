@@ -1541,9 +1541,7 @@ def main_curses(stdscr):
                         pool.append(fn)
                         pool_map[fn] = len(pool)
                     idx = pool_map[fn]
-                    if rep > 1:
-                        seq_tokens.append(f"{idx}x{rep}")
-                    else:
+                    for _ in range(rep):
                         seq_tokens.append(str(idx))
 
                 # Derive #PLAY (informational; sections + bare patterns)

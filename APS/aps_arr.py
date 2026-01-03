@@ -37,10 +37,10 @@ def save_arr(path: str, chain: List[ChainEntry], bpm: int) -> None:
     seq_parts = []
     for entry in chain:
         i = idx_map[entry.filename]
-        if entry.repeats == 1:
+        
+        for _ in range(entry.repeats):
             seq_parts.append(str(i))
-        else:
-            seq_parts.append(f"{i}x{entry.repeats}")
+
     main_line = "MAIN|" + ",".join(seq_parts)
 
     lines: List[str] = []
