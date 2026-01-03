@@ -48,6 +48,7 @@ class Pattern:
     triplet: bool
 
 
+    play_bars: int = 2
 @dataclass
 class ChainEntry:
     filename: str
@@ -59,6 +60,15 @@ def load_adt(path: str) -> Pattern:
     if parse_adt_text is None:
         raise RuntimeError("adt2adp.py 가 필요합니다.")
     raw = open(path, "r", encoding="utf-8", errors="ignore").read()
+    # Effective playback length (default: 2 bars).
+    # If ADT header contains PLAY_BARS=1, treat as a 1-bar pattern.
+    # If header flag is absent, filename hint *_HNNN.ADT may be used as a fallback.
+    play_bars = 2
+    if re.search(r"^\s*PLAY_BARS\s*=\s*1\s*$", raw, flags=re.IGNORECASE | re.MULTILINE):
+        play_bars = 1
+    elif is_h_pattern_filename(os.path.basename(path)):
+        play_bars = 1
+
     meta, slot_decl, grid, _norm = parse_adt_text(raw)
 
     length = int(meta["LENGTH"])
@@ -86,6 +96,7 @@ def load_adt(path: str) -> Pattern:
         slot_name=slot_name,
         time_sig=time_sig,
         triplet=triplet,
+        play_bars=play_bars,
     )
 
 
@@ -186,8 +197,9 @@ def compute_timing(p: Pattern) -> Tuple[int, int, int, int]:
         beats = int(num)
     except Exception:
         beats = 4
-    bars = 2
-    steps_per_bar = p.length // bars if bars else p.length
+    bars = getattr(p, 'play_bars', 2)
+    effective_len = p.length if bars == 2 else max(1, p.length // 2)
+    steps_per_bar = effective_len // bars if bars else effective_len
     steps_per_beat = steps_per_bar // beats if beats else steps_per_bar
     return beats, bars, steps_per_beat, steps_per_bar
 
@@ -207,11 +219,11 @@ def pattern_sort_key(fname: str):
     ext_rank = {'.adt': 0, '.apt': 0, '.adp': 1}.get(ext.lower(), 9)
     num = 9999
     kind_rank = 2
-    m = re.search(r"_([pPbB])(\d{3})$", base)
+    m = re.search(r"_([pPbBhH])(\d{3})$", base)
     if m:
         kind = m.group(1).upper()
         num = int(m.group(2))
-        kind_rank = 0 if kind == 'P' else 1
+        kind_rank = {'P': 0, 'B': 1, 'H': 2}.get(kind, 9)
     return (genre.upper(), ext_rank, num, kind_rank, fname.lower())
 
 
@@ -222,3 +234,98 @@ def scan_patterns(root: str):
             out.append(f)
     out.sort(key=pattern_sort_key)
     return out
+
+# --- ADT meta utilities: PLAY_BARS=1 -----------------------------------------
+
+def is_h_pattern_filename(fname: str) -> bool:
+    """
+    Return True if filename indicates a half (1-bar) pattern by convention, e.g. RCK_H001.ADT
+    This is a *hint* only; authoritative flag is PLAY_BARS=1 in ADT header when present.
+    """
+    base = os.path.splitext(os.path.basename(fname))[0]
+    return re.search(r"_H(\d{3})$", base, flags=re.IGNORECASE) is not None
+
+
+def _normalize_newlines(raw: str) -> str:
+    # Keep file ending with '\n' for stable diffs
+    raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+    if not raw.endswith("\n"):
+        raw += "\n"
+    return raw
+
+
+def _find_header_insert_index(lines: List[str]) -> int:
+    """
+    Find a reasonable insertion point for meta keys.
+    Strategy:
+      - Insert after NAME= if present
+      - Else insert near the top, before the first blank line (if any)
+      - Else insert at line 0+ (top)
+    """
+    # After NAME=
+    for i, ln in enumerate(lines[:80]):  # header is usually near the top
+        if ln.strip().upper().startswith("NAME="):
+            return i + 1
+
+    # Before first blank line (keeps meta within header block)
+    for i, ln in enumerate(lines[:200]):
+        if ln.strip() == "":
+            return i
+
+    return 0
+
+
+def set_adt_play_bars(path: str, bars: Optional[int]) -> bool:
+    """
+    Ensure ADT header contains (or does not contain) PLAY_BARS=1.
+
+    - bars == 1 : ensure PLAY_BARS=1 exists (exactly once)
+    - bars is None : remove PLAY_BARS=... lines (currently only PLAY_BARS=1 is used)
+    - other values are rejected (returns False)
+
+    Returns True if file was modified, False if no change was needed or on error.
+    """
+    if bars not in (1, None):
+        return False
+
+    try:
+        raw = open(path, "r", encoding="utf-8", errors="ignore").read()
+    except Exception:
+        return False
+
+    raw = _normalize_newlines(raw)
+    lines = raw.split("\n")  # includes last empty after trailing newline
+
+    # Remove any existing PLAY_BARS=... lines (case-insensitive)
+    def is_play_bars_line(ln: str) -> bool:
+        s = ln.strip().upper()
+        return s.startswith("PLAY_BARS=")
+
+    had_any = any(is_play_bars_line(ln) for ln in lines)
+    if bars is None:
+        if not had_any:
+            return False
+        new_lines = [ln for ln in lines if not is_play_bars_line(ln)]
+        new_raw = "\n".join(new_lines)
+        new_raw = _normalize_newlines(new_raw)
+    else:
+        # bars == 1
+        # First, strip any PLAY_BARS=... (to avoid duplicates / conflicts), then insert PLAY_BARS=1
+        new_lines = [ln for ln in lines if not is_play_bars_line(ln)]
+        insert_at = _find_header_insert_index(new_lines)
+        new_lines.insert(insert_at, "PLAY_BARS=1")
+        new_raw = "\n".join(new_lines)
+        new_raw = _normalize_newlines(new_raw)
+
+        # If it already had exactly PLAY_BARS=1 at the right place, this may still rewrite.
+        # To avoid needless rewrite, compare normalized raw.
+        if new_raw == raw:
+            return False
+
+    try:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(new_raw)
+    except Exception:
+        return False
+
+    return True

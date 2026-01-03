@@ -85,6 +85,7 @@ from aps_core import (
     load_adp,
     scan_patterns,
     compute_timing,  # (not used directly here, kept for reference)
+    set_adt_play_bars,
 )
 from aps_sections import ChainSelection, SectionManager
 from aps_arr import save_arr, parse_arr
@@ -120,22 +121,27 @@ import aps_stepseq
 # Used by show_warning_popup wrapper to call NC-style dialogs without threading stdscr everywhere.
 _GLOBAL_STDSCR_FOR_DIALOGS = None
 
-def toggle_p_b(fname: str) -> Optional[str]:
+def cycle_p_b_h(fname: str) -> Optional[tuple[str, str, str]]:
     """
-    Toggle the filename suffix between _P### and _B###.
-    Example: SWG_P001.ADT -> SWG_B001.ADT
+    Cycle the filename suffix between _P### -> _B### -> _H### -> _P###.
+
+    Returns (new_name, old_kind, new_kind) where kind is one of 'P','B','H'.
+    Example: SWG_P001.ADT -> SWG_B001.ADT -> SWG_H001.ADT -> SWG_P001.ADT
     """
     base, ext = os.path.splitext(fname)
     import re
-
-    m = re.search(r"_([pPbB])(\d{3})$", base)
+    m = re.search(r"_([pPbBhH])(\d{3})$", base)
     if not m:
         return None
-    kind = m.group(1).upper()
+    old_kind = m.group(1).upper()
     num = m.group(2)
-    new_kind = "B" if kind == "P" else "P"
+    nxt = {"P": "B", "B": "H", "H": "P"}
+    new_kind = nxt.get(old_kind)
+    if not new_kind:
+        return None
     new_base = base[: m.start(1)] + new_kind + num
-    return new_base + ext
+    return new_base + ext, old_kind, new_kind
+
 
 
 def find_gs():
@@ -1405,6 +1411,16 @@ def main_curses(stdscr):
 
                 with open(path, "r", encoding="utf-8") as f:
                     content = f.read().splitlines()
+                # Patch known keymap lines on-the-fly (keep file as-is)
+                try:
+                    content = [
+                        (ln.replace("| `C` | Instant pattern copy (global) |",
+                                    "| `C` | Cycle pattern suffix: P→B→H→P (H adds PLAY_BARS=1) |")
+                         if "Instant pattern copy" in ln else ln)
+                        for ln in content
+                    ]
+                except Exception:
+                    pass
                 show_text_viewer(content, title=f"Keymap: {fn}")
             except Exception as e:
                 msg = f"Keymap open error: {e}"
@@ -1541,7 +1557,9 @@ def main_curses(stdscr):
                         pool.append(fn)
                         pool_map[fn] = len(pool)
                     idx = pool_map[fn]
-                    for _ in range(rep):
+                    if rep > 1:
+                        seq_tokens.append(f"{idx}x{rep}")
+                    else:
                         seq_tokens.append(str(idx))
 
                 # Derive #PLAY (informational; sections + bare patterns)
@@ -2495,13 +2513,23 @@ def main_curses(stdscr):
                 and pattern_files
             ):
                 old = pattern_files[selected_idx]
-                new = toggle_p_b(old)
-                if new:
+                cy = cycle_p_b_h(old)
+                if cy:
+                    new, old_kind, new_kind = cy
                     oldp = os.path.join(root, old)
                     newp = os.path.join(root, new)
                     if not os.path.exists(newp):
                         try:
                             os.rename(oldp, newp)
+
+                            # Apply/remove ADT meta for half-patterns
+                            # - entering H: ensure PLAY_BARS=1
+                            # - leaving H: remove PLAY_BARS=...
+                            if new_kind == "H":
+                                set_adt_play_bars(newp, 1)
+                            elif old_kind == "H" and new_kind != "H":
+                                set_adt_play_bars(newp, None)
+
                             pattern_files = scan_patterns(root)
                             if new in pattern_files:
                                 selected_idx = pattern_files.index(new)
@@ -2523,8 +2551,6 @@ def main_curses(stdscr):
                     else:
                         msg = "파일이 이미 존재"
             continue
-
-
 def main():
     curses.wrapper(main_curses)
 

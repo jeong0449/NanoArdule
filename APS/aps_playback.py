@@ -34,9 +34,12 @@ def play_pattern_on_output(
     color_pairs,
 ):
     beats, bars, spb, spbar = compute_timing(p)
+    # For half-patterns (1 bar), play only the first half of the grid without consuming time for the 2nd bar.
+    effective_len = p.length if getattr(p, "play_bars", 2) == 2 else max(1, p.length // 2)
+
     total_beats = beats * bars if beats else 4
     sec_per_beat = 60.0 / bpm
-    step_sec = (total_beats * sec_per_beat) / p.length
+    step_sec = (total_beats * sec_per_beat) / effective_len
 
     # Gate must never exceed step duration
     gate = min(step_sec * 0.6, 0.08)
@@ -57,7 +60,7 @@ def play_pattern_on_output(
         t_start = time.perf_counter()
         t_step = t_start  # scheduled start time of current step
 
-        for step in range(p.length):
+        for step in range(effective_len):
             # Stop check (non-blocking)
             if _poll_space_to_stop():
                 raise KeyboardInterrupt
