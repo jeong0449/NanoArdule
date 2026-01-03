@@ -69,6 +69,16 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
     # Timing info
     beats, bars, spb, spbar = compute_timing(pattern)
 
+    # Half-pattern support: if pattern is marked as 1-bar playback (e.g., filename contains "_H"),
+    # dim the preview for the 2nd bar to make the inactive region visually obvious in the main grid.
+    try:
+        is_half = ("_H" in (pattern.name or "")) or ("_H" in (pattern.path or ""))
+    except Exception:
+        is_half = False
+
+    # Start step index of the 2nd bar. Prefer timing-derived steps-per-bar when available.
+    second_bar_start = spbar if (spbar and spbar > 0) else (pattern.length // 2)
+
     # Reverse slot order so KK appears at the bottom
     slots = list(range(pattern.slots - 1, -1, -1))
 
@@ -104,7 +114,29 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
             attr = 0
             ch = HIT_CHAR
 
-            if current_step is not None and current_step == step:
+            # If this is a half pattern, dim the entire 2nd bar region in the preview.
+            is_second_bar = bool(is_half) and (step >= second_bar_start)
+
+            if is_second_bar:
+                # Force a uniform "inactive" look for the 2nd bar:
+                # - hits: gray block
+                # - rests: gray dot
+                if acc > 0:
+                    ch = HIT_CHAR
+                else:
+                    ch = "·"
+
+                # Prefer an explicit dim pair if the caller provided it; otherwise fall back
+                # to the existing even-beat no-hit color with A_DIM.
+                if use_color:
+                    try:
+                        dim_key = "dim" if "dim" in color_pairs else "n"
+                        attr |= curses.color_pair(color_pairs.get(dim_key, 0))
+                    except Exception:
+                        pass
+                attr |= curses.A_DIM
+
+            elif current_step is not None and current_step == step:
                 # Current playing step: use 'play' color; show '|' when no-hit
                 ch = HIT_CHAR if acc > 0 else "|"
                 if use_color:
