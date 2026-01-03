@@ -197,7 +197,40 @@ Characteristics:
 
 ---
 
-## 6. Section Semantics
+## 6. Half-pattern (1-bar) handling (recommended operating policy)
+
+APS may treat certain patterns as "1-bar patterns" (i.e., half of a 2-bar grid) for playback convenience.
+This is an **operating policy** and does not change the ARR syntax itself.
+
+### 6.1 Priority rules (authoritative order)
+
+When determining the effective playback length of a referenced ADT pattern:
+
+1. **ADT header flag (authoritative):**
+   - If the ADT header contains `HALF=1`, the pattern SHALL be treated as a **1-bar pattern**.
+2. **Filename hint (fallback):**
+   - If no ADT header flag is present and the filename matches the half-pattern hint form
+     `*_HNNN.ADT` (where `NNN` is a three-digit index), the pattern SHALL be treated as a **1-bar pattern**.
+3. **Default:**
+   - Otherwise, the pattern is treated as a **2-bar pattern** (default behavior).
+
+If both the ADT header flag and the filename hint are present but conflict, APS SHOULD warn the user and MUST follow the ADT header flag.
+
+### 6.2 Semantics of a 1-bar pattern
+
+A 1-bar pattern is interpreted as the **first half** of a 2-bar grid:
+- The pattern body MAY still contain a full 2-bar grid (e.g., 32 steps), but only the **first half** is considered active for playback.
+- The remaining half is ignored for playback (reserved for future extensions).
+
+### 6.3 Interaction with ARR (`#PLAY` and `MAIN`)
+
+- The `MAIN|...` sequence remains a flat list of pattern indices and does not encode duration.
+- Any partial-length intent (e.g., half-pattern usage) is expressed by the ADT/filename policy above and/or the `#PLAY` block, without introducing fractional syntax into `MAIN`.
+
+
+---
+
+## 7. Section Semantics
 
 In ARR v0.05:
 
@@ -213,7 +246,7 @@ They exist to support:
 
 ---
 
-## 7. Editing and Saving Rules
+## 8. Editing and Saving Rules
 
 APS writes ARR files in the following order:
 
@@ -225,7 +258,7 @@ APS writes ARR files in the following order:
 
 ---
 
-## 8. Compatibility and Forward Strategy
+## 9. Compatibility and Forward Strategy
 
 ARR v0.05 is **not a DSL**.
 
@@ -239,7 +272,7 @@ These are reserved for ARR v0.1 and later.
 
 ---
 
-## 9. Versioning Policy
+## 10. Versioning Policy
 
 * Files conforming to this document are **ARR v0.05**
 * APS MAY treat files without explicit version tags as v0.05-compatible
@@ -251,7 +284,7 @@ These are reserved for ARR v0.1 and later.
 
 ---
 
-## 10. Summary
+## 11. Summary
 
 ARR v0.05 is a pragmatic, editor-friendly chain format:
 
