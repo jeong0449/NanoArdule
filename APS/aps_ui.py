@@ -72,7 +72,7 @@ def draw_grid(pattern: Optional[Pattern], win, current_step, use_color, color_pa
     # Half-pattern support: if pattern is marked as 1-bar playback (e.g., filename contains "_H"),
     # dim the preview for the 2nd bar to make the inactive region visually obvious in the main grid.
     try:
-        is_half = ("_H" in (pattern.name or "")) or ("_H" in (pattern.path or ""))
+        is_half = ("_H" in (pattern.name or "")) or ("_h" in (pattern.name or "")) or ("_H" in (pattern.path or "")) or ("_h" in (pattern.path or ""))
     except Exception:
         is_half = False
 

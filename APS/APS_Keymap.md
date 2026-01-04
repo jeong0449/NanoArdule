@@ -1,6 +1,6 @@
 # APS (Ardule Pattern Studio) – Key Map & Controls
 
-**Last updated:** 2026-01-03
+**Last updated:** 2026-01-04
 
 This document summarizes the current key bindings of **APS**,
 with a focus on **Chain Edit** and related workflows.
@@ -12,13 +12,13 @@ with a focus on **Chain Edit** and related workflows.
 | Key | Action |
 |-----|--------|
 | `Q` | Quit APS |
-| `H` | Show help |
+| `F1` / `H` | Show help |
 | `Space` | Play / Stop |
-| `C` | Cycle pattern suffix: P→B→H→P (H adds PLAY_BARS=1) |
+| `C` | Cycle pattern suffix: P→B→h→P (h adds PLAY_BARS=1; legacy H also supported) |
 | `S` | Enter Step Sequencer |
 | `B` | Build hybrid pattern |
 | `R` / `r` | Toggle repeat mode *(non-Chain focus only)* |
-
+| `G` | Genre filter for PAT list (popup: ALL + genres by count) |
 ---
 
 ## Chain Edit Mode
@@ -88,6 +88,22 @@ a preview area may show the full label below.
 
 ---
 
+---
+
+## Genre Filter (PAT list)
+
+When the **Patterns (PAT) list** has focus:
+
+- Press `G` to open a Norton Commander–style genre picker.
+- The picker shows:
+  - `ALL` (total pattern count)
+  - Genres sorted by pattern count (descending)
+  - Columns: **3-letter code**, **full name**, **count**
+- Use `↑ / ↓` or `PgUp / PgDn` to navigate, `Enter` to apply, `Esc` to cancel.
+- When a genre is active, the PAT list shows only that genre and the PAT title displays the genre in brackets.
+- Refresh (`F3`) rescans the patterns directory and keeps the current genre filter.
+
+
 ## Visual Conventions
 
 - **Reverse video**: block selection only
@@ -105,7 +121,7 @@ a preview area may show the full label below.
 
 ---
 
-_Last updated: 2026-01-03_
+_Last updated: 2026-01-04_
 
 
 ## List Focus–Specific Insert Keys

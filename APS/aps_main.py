@@ -123,10 +123,12 @@ _GLOBAL_STDSCR_FOR_DIALOGS = None
 
 def cycle_p_b_h(fname: str) -> Optional[tuple[str, str, str]]:
     """
-    Cycle the filename suffix between _P### -> _B### -> _H### -> _P###.
+    Cycle the filename suffix between _P### -> _B### -> _h### -> _P###.
 
-    Returns (new_name, old_kind, new_kind) where kind is one of 'P','B','H'.
-    Example: SWG_P001.ADT -> SWG_B001.ADT -> SWG_H001.ADT -> SWG_P001.ADT
+    Returns (new_name, old_kind, new_kind) where kind is one of 'P','B','h'.
+    Example: SWG_P001.ADT -> SWG_B001.ADT -> SWG_h001.ADT -> SWG_P001.ADT
+
+    Note: Legacy _H### filenames are still recognized for backward compatibility.
     """
     base, ext = os.path.splitext(fname)
     import re
@@ -139,8 +141,11 @@ def cycle_p_b_h(fname: str) -> Optional[tuple[str, str, str]]:
     new_kind = nxt.get(old_kind)
     if not new_kind:
         return None
-    new_base = base[: m.start(1)] + new_kind + num
-    return new_base + ext, old_kind, new_kind
+
+    # Use lowercase 'h' for half patterns to make them visually distinct.
+    new_kind_char = "h" if new_kind == "H" else new_kind
+    new_base = base[: m.start(1)] + new_kind_char + num
+    return new_base + ext, old_kind, new_kind_char
 
 
 
@@ -219,6 +224,74 @@ def main_curses(stdscr):
 
     # Pattern / ARR list
     pattern_files: List[str] = scan_patterns(root)
+
+    # --- Genre filter (PAT list) ---
+    # NOTE: Pattern genre is derived from the first 3 characters of the filename (without extension).
+    # This filter is UI-only: it does not rename files or change pattern contents.
+    GENRE_FULLNAME = {
+        "ALL": "All Patterns",
+        "AFC": "Afro-Cuban",
+        "BAL": "Ballad",
+        "BLU": "Blues",
+        "BNV": "Bossa Nova",
+        "BOG": "Boogie",
+        "CHA": "Cha-cha",
+        "CHS": "Charleston",
+        "DRM": "Unclassified",
+        "DSC": "Disco",
+        "EDM": "EDM",
+        "END": "Ending",
+        "FNK": "Funk",
+        "HHP": "Hip-hop",
+        "HSE": "House",
+        "JZZ": "Jazz",
+        "LAT": "Latin",
+        "MCH": "March",
+        "MTL": "Metal",
+        "POP": "Pop",
+        "PSD": "Paso Doble",
+        "REG": "Reggae",
+        "RCK": "Rock",
+        "RNB": "R&B",
+        "SHF": "Shuffle",
+        "SKA": "Ska",
+        "SMB": "Samba",
+        "SWG": "Swing",
+        "TNG": "Tango",
+        "TNO": "Techno",
+        "TST": "Test",
+        "TWT": "Twist",
+        "WLZ": "Waltz",
+    }
+
+    def _pat_genre_code(fname: str) -> str:
+        base = os.path.splitext(os.path.basename(fname))[0]
+        return base[:3].upper() if len(base) >= 3 else "???"
+
+    # Keep an unfiltered snapshot and a currently active filter code.
+    pattern_all: List[str] = list(pattern_files)
+    active_genre: str = "ALL"
+
+    def _apply_genre_filter(files: List[str], genre_code: str) -> List[str]:
+        if not files:
+            return []
+        g = (genre_code or "ALL").upper()
+        if g == "ALL":
+            return list(files)
+        return [f for f in files if _pat_genre_code(f) == g]
+
+    def refresh_pattern_lists(rescan: bool = False) -> None:
+        """Refresh PAT list (optionally rescan the patterns folder) and re-apply active genre filter."""
+        nonlocal pattern_files, selected_idx
+        nonlocal pattern_all, active_genre
+        nonlocal pattern_cache
+        if rescan:
+            pattern_all = scan_patterns(root)
+            pattern_cache.clear()
+        pattern_files = _apply_genre_filter(pattern_all, active_genre)
+        if selected_idx >= len(pattern_files):
+            selected_idx = max(0, len(pattern_files) - 1)
+
     arr_files: List[str] = sorted(
         f for f in os.listdir(root) if f.lower().endswith(".arr")
     )
@@ -228,6 +301,8 @@ def main_curses(stdscr):
 
     selected_idx = 0
     loaded_pattern: Optional[Pattern] = None
+    pattern_cache = {}  # filename -> parsed Pattern cache
+
     chain: List[ChainEntry] = []
     chain_selected_idx = 0  # Chain cursor (insertion position)
     focus = "patterns"  # "patterns" or "chain"
@@ -314,6 +389,43 @@ def main_curses(stdscr):
         # Drop very old entries (keep only the most recent 100 steps)
         if len(undo_stack) > 100:
             undo_stack.pop(0)
+
+    
+    def load_pattern_by_filename(fname: str) -> Optional[Pattern]:
+        """Load a pattern file by filename with a small in-memory cache."""
+        nonlocal msg
+        if not fname:
+            return None
+        if fname in pattern_cache:
+            return pattern_cache[fname]
+        path = os.path.join(root, fname)
+        lower = fname.lower()
+        try:
+            if lower.endswith(".adt"):
+                pat = load_adt(path)
+            elif lower.endswith(".apt"):
+                pat = load_apt(path)
+            else:
+                pat = load_adp(path)
+            pattern_cache[fname] = pat
+            return pat
+        except Exception as e:
+            msg = str(e)
+            return None
+
+    def get_chain_preview_filename() -> Optional[str]:
+        """Return the filename for the currently highlighted chain entry."""
+        if not chain:
+            return None
+        idx = chain_selected_idx
+        if idx < 0:
+            idx = 0
+        if idx >= len(chain):
+            idx = len(chain) - 1
+        try:
+            return chain[idx].filename
+        except Exception:
+            return None
 
     def load_preview():
         """현재 pattern_files / selected_idx 기반으로 프리뷰 로드 (list_mode=patterns일 때만 의미 있음)."""
@@ -912,13 +1024,49 @@ def main_curses(stdscr):
                 msg = f"StepSeq save failed: {e}"
         else:
             msg = "StepSeq: modified (not saved)"
+    # Track last known terminal size to handle resize reliably across terminals.
+    last_max_y = None
+    last_max_x = None
 
+    def handle_terminal_resize(force: bool = False) -> bool:
+        """Handle terminal resize in a single, centralized place.
 
+        Returns True if a resize was handled and a full redraw should occur.
+        """
+        nonlocal last_max_y, last_max_x
+        try:
+            cur_y, cur_x = stdscr.getmaxyx()
+        except Exception:
+            return False
+
+        if (not force) and last_max_y is not None and last_max_x is not None and (cur_y, cur_x) == (last_max_y, last_max_x):
+            return False
+
+        last_max_y, last_max_x = cur_y, cur_x
+
+        try:
+            curses.update_lines_cols()
+        except Exception:
+            pass
+        try:
+            curses.resizeterm(cur_y, cur_x)
+        except Exception:
+            pass
+
+        try:
+            stdscr.erase()
+            stdscr.refresh()
+        except Exception:
+            pass
+        return True
 
 
     while True:
+        if handle_terminal_resize():
+            continue
         stdscr.clear()
         draw_menu(stdscr)
+
         # Menu bar override (F4 Info, F5 DupPat)
         try:
             max_y0, max_x0 = stdscr.getmaxyx()
@@ -980,11 +1128,18 @@ def main_curses(stdscr):
 
         # Title depends on focus + mode
         mode_tag = "PAT" if list_mode == "patterns" else "ARR"
+
+        # Add active genre filter label to the PAT list title (if any).
+        genre_label = ""
+        if list_mode == "patterns" and active_genre and active_genre != "ALL":
+            full_name = GENRE_FULLNAME.get(active_genre, active_genre)
+            genre_label = f" [{full_name.upper()}]"
+
         if focus == "patterns":
-            title = f" ▶ {mode_tag} List "
+            title = f" ▶ {mode_tag} List{genre_label} "
             title_attr = curses.A_BOLD
         else:
-            title = f"   {mode_tag} List "
+            title = f"   {mode_tag} List{genre_label} "
             title_attr = 0
         try:
             if title_attr:
@@ -1082,7 +1237,25 @@ def main_curses(stdscr):
         list_win.refresh()
 
         grid_win = stdscr.derwin(grid_h, right_w, work_top, list_w + 1)
-        draw_grid(loaded_pattern, grid_win, None, use_color, color_pairs)
+        preview_pattern = loaded_pattern
+        chain_preview_active = False
+        if focus == "chain":
+            chain_fname = get_chain_preview_filename()
+            if chain_fname:
+                preview_pattern = load_pattern_by_filename(chain_fname)
+                chain_preview_active = True
+        draw_grid(preview_pattern, grid_win, None, use_color, color_pairs)
+        # Add a small marker when the preview is driven by the chain cursor.
+        if chain_preview_active:
+            try:
+                gh, gw = grid_win.getmaxyx()
+                tag = "[CHAIN PREVIEW]"
+                x = gw - len(tag) - 2
+                if x < 1:
+                    x = 1
+                grid_win.addstr(0, x, tag)
+            except curses.error:
+                pass
 ####
         # In composite preview, show A/B pattern names and mode
         if composite_mode and len(bar_sources) == 2:
@@ -1141,23 +1314,9 @@ def main_curses(stdscr):
         ch = stdscr.getch()
         # --- terminal resize handling ---
         if ch == curses.KEY_RESIZE:
-            try:
-                # Refresh curses' idea of screen size
-                curses.update_lines_cols()
-            except Exception:
-                pass
+            if handle_terminal_resize(force=True):
+                continue
 
-            try:
-                h, w = stdscr.getmaxyx()
-                # Tell curses to resize internal structures
-                curses.resizeterm(h, w)
-            except Exception:
-                pass
-
-            # Force full redraw on next iteration
-            stdscr.erase()
-            stdscr.refresh()
-            continue
         
         
 
@@ -1277,6 +1436,92 @@ def main_curses(stdscr):
             except curses.error:
                 show_message(stdscr, f"{title}: " + (content[0] if content else ""), 2.0)
 
+
+        def choose_genre_filter_popup() -> Optional[str]:
+            """Show an NC-style genre selection popup and return selected genre code, or None if canceled."""
+            nonlocal pattern_all, active_genre
+
+            # Build counts from the unfiltered list.
+            counts: Dict[str, int] = {}
+            for fn in pattern_all:
+                g = _pat_genre_code(fn)
+                counts[g] = counts.get(g, 0) + 1
+
+            items: List[tuple[str, str, int]] = []
+            items.append(("ALL", GENRE_FULLNAME.get("ALL", "ALL"), len(pattern_all)))
+            for g, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+                items.append((g, GENRE_FULLNAME.get(g, g), c))
+
+            # Initial cursor
+            cur = 0
+            for i, (g, _, _) in enumerate(items):
+                if g.upper() == (active_genre or "ALL").upper():
+                    cur = i
+                    break
+
+            max_y, max_x = stdscr.getmaxyx()
+            w = min(max_x - 4, 72)
+            h = min(max_y - 4, max(12, min(22, len(items) + 6)))
+            y0 = (max_y - h) // 2
+            x0 = (max_x - w) // 2
+
+            try:
+                win = curses.newwin(h, w, y0, x0)
+                win.keypad(True)
+                curses.curs_set(0)
+            except curses.error:
+                return None
+
+            top = 0
+            visible = h - 6
+            if visible < 1:
+                visible = 1
+
+            def _draw():
+                win.erase()
+                win.bkgd(" ", curses.A_REVERSE)
+                win.border()
+                title = " Genre Filter (G) "
+                if len(title) < w - 2:
+                    win.addnstr(0, max(1, (w - len(title)) // 2), title, w - 2, curses.A_REVERSE)
+
+                hdr = "CODE  NAME                          COUNT"
+                win.addnstr(2, 2, hdr.ljust(w - 4), w - 4, curses.A_REVERSE)
+
+                end = min(len(items), top + visible)
+                for row, i in enumerate(range(top, end)):
+                    g, name, c = items[i]
+                    line = f"{g:<4}  {name:<28}  {c:>5}"
+                    attr = curses.A_REVERSE
+                    if i == cur:
+                        attr = curses.A_REVERSE | curses.A_BOLD
+                    win.addnstr(3 + row, 2, line.ljust(w - 4), w - 4, attr)
+
+                hint = "Enter: apply   Esc: cancel   PgUp/PgDn: page"
+                win.addnstr(h - 2, 2, hint[: (w - 4)].ljust(w - 4), w - 4, curses.A_REVERSE)
+                win.refresh()
+
+            while True:
+                if cur < top:
+                    top = cur
+                elif cur >= top + visible:
+                    top = cur - visible + 1
+                _draw()
+
+                k = win.getch()
+                if k in (27,):  # ESC
+                    return None
+                if k in (10, 13):  # Enter
+                    return items[cur][0]
+                if k in (curses.KEY_UP, ord("k")):
+                    cur = max(0, cur - 1)
+                elif k in (curses.KEY_DOWN, ord("j")):
+                    cur = min(len(items) - 1, cur + 1)
+                elif k == curses.KEY_PPAGE:
+                    cur = max(0, cur - visible)
+                elif k == curses.KEY_NPAGE:
+                    cur = min(len(items) - 1, cur + visible)
+
         def duplicate_selected_pattern():
             nonlocal pattern_files, selected_idx, list_mode, msg
             if list_mode != "patterns" or not pattern_files:
@@ -1362,9 +1607,73 @@ def main_curses(stdscr):
                 msg = "Nothing to undo"
             continue
 
-        # F1: Help
+        # F1: Help (prefer markdown manual if available)
         if ch == curses.KEY_F1:
-            show_help_curses(stdscr)
+            try:
+                import glob
+
+                candidates = []
+                search_dirs = []
+
+                # Prefer the runtime root (used elsewhere), but also try the current
+                # working directory and the script directory.
+                try:
+                    if root:
+                        search_dirs.append(root)
+                except Exception:
+                    pass
+
+                try:
+                    search_dirs.append(os.getcwd())
+                except Exception:
+                    pass
+
+                try:
+                    search_dirs.append(os.path.dirname(os.path.abspath(__file__)))
+                except Exception:
+                    pass
+
+                # Common docs folders
+                for d in list(search_dirs):
+                    try:
+                        search_dirs.append(os.path.join(d, "docs"))
+                        search_dirs.append(os.path.join(d, "design-notes"))
+                    except Exception:
+                        pass
+
+                patterns = [
+                    "APS_Help*.md",
+                    "APS_UserGuide*.md",
+                    "APS_Manual*.md",
+                    "APS_Keymap*.md",
+                    "APS_ChainEditor*.md",
+                    "README*.md",
+                ]
+
+                seen = set()
+                for d in search_dirs:
+                    try:
+                        d = os.path.abspath(d)
+                        if d in seen:
+                            continue
+                        seen.add(d)
+                        for pat in patterns:
+                            candidates.extend(glob.glob(os.path.join(d, pat)))
+                    except Exception:
+                        pass
+
+                if candidates:
+                    candidates.sort(key=lambda p: os.path.getmtime(p))
+                    path = candidates[-1]
+                    fn = os.path.basename(path)
+                    with open(path, "r", encoding="utf-8") as f:
+                        content = f.read().splitlines()
+                    show_text_viewer(content, title=f"Help: {fn}")
+                else:
+                    # Fallback to the built-in help screen if no markdown is found
+                    show_help_curses(stdscr)
+            except Exception as e:
+                msg = f"Help open error: {e}"
             continue
             
         # H/h: open the latest keymap markdown (APS_Keymap*.md)
@@ -1463,7 +1772,8 @@ def main_curses(stdscr):
 
         # F3: refresh (keep current mode, rescan directory)
         if ch == curses.KEY_F3:
-            pattern_files = scan_patterns(root)
+            # Rescan directories and keep the active genre filter (PAT list).
+            refresh_pattern_lists(rescan=True)
             arr_files = sorted(
                 f for f in os.listdir(root) if f.lower().endswith(".arr")
             )
@@ -2031,6 +2341,22 @@ def main_curses(stdscr):
             current_list = arr_files if list_mode == "arr" else pattern_files
             total = len(current_list)
 
+            # G: Genre filter popup (PAT list only)
+            if ch in (ord("g"), ord("G")) and list_mode == "patterns":
+                # Show genre filter popup (counts based on the current in-memory PAT list).
+                choice = choose_genre_filter_popup()
+                if choice is not None:
+                    active_genre = choice.upper()
+                    pattern_files = _apply_genre_filter(pattern_all, active_genre)
+                    selected_idx = 0
+                    top_index = 0
+                    if pattern_files:
+                        load_preview()
+                    else:
+                        loaded_pattern = None
+                continue
+
+
             # ↑ / k: move up one item
             if ch in (curses.KEY_UP, ord("k")):
                 if total > 0 and selected_idx > 0:
@@ -2525,9 +2851,9 @@ def main_curses(stdscr):
                             # Apply/remove ADT meta for half-patterns
                             # - entering H: ensure PLAY_BARS=1
                             # - leaving H: remove PLAY_BARS=...
-                            if new_kind == "H":
+                            if str(new_kind).lower() == "h":
                                 set_adt_play_bars(newp, 1)
-                            elif old_kind == "H" and new_kind != "H":
+                            elif str(old_kind).upper() == "H" and str(new_kind).lower() != "h":
                                 set_adt_play_bars(newp, None)
 
                             pattern_files = scan_patterns(root)
