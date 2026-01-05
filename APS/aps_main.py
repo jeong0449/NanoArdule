@@ -597,7 +597,7 @@ def main_curses(stdscr):
             hyb_next_index += 1
 
             # After saving, rescan pattern list (so new HYB_P9xx.APT appears)
-            pattern_files = scan_patterns(root)
+            refresh_pattern_lists(rescan=True)
             try:
                 new_idx = pattern_files.index(t)
                 selected_idx = new_idx
@@ -1018,7 +1018,7 @@ def main_curses(stdscr):
             try:
                 validate_grid_levels_v22a(pat)
                 write_adt_file_v22a(path, pat)
-                pattern_files = scan_patterns(root)
+                refresh_pattern_lists(rescan=True)
                 msg = f"StepSeq: saved {fname}"
             except Exception as e:
                 msg = f"StepSeq save failed: {e}"
@@ -1545,7 +1545,7 @@ def main_curses(stdscr):
                         with open(dst_path, "wb") as fdst:
                             fdst.write(data)
                         # Refresh list and select the new file
-                        pattern_files = scan_patterns(root)
+                        refresh_pattern_lists(rescan=True)
                         if dst_name in pattern_files:
                             selected_idx = pattern_files.index(dst_name)
                         msg = f"DupPat: {src_name} -> {dst_name}"
@@ -1738,7 +1738,7 @@ def main_curses(stdscr):
 
         # F2: toggle Pat/ARR list + refresh
         if ch == curses.KEY_F2:
-            pattern_files = scan_patterns(root)
+            refresh_pattern_lists(rescan=True)
             arr_files = sorted(
                 f for f in os.listdir(root) if f.lower().endswith(".arr")
             )
@@ -2856,7 +2856,7 @@ def main_curses(stdscr):
                             elif str(old_kind).upper() == "H" and str(new_kind).lower() != "h":
                                 set_adt_play_bars(newp, None)
 
-                            pattern_files = scan_patterns(root)
+                            refresh_pattern_lists(rescan=True)
                             if new in pattern_files:
                                 selected_idx = pattern_files.index(new)
                             else:
