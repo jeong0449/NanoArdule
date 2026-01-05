@@ -329,3 +329,69 @@ def set_adt_play_bars(path: str, bars: Optional[int]) -> bool:
         return False
 
     return True
+
+
+
+def set_adt_name(path: str, name: Optional[str]) -> bool:
+    """
+    Ensure ADT header contains (or does not contain) NAME=... line.
+
+    - name is a non-empty string: ensure NAME=<name> exists (exactly once)
+    - name is None or empty: remove NAME=... lines
+
+    Returns True if file was modified, False if no change was needed or on error.
+    """
+    try:
+        raw = open(path, "r", encoding="utf-8", errors="ignore").read()
+    except Exception:
+        return False
+
+    raw = _normalize_newlines(raw)
+    lines = raw.split("\n")  # includes last empty after trailing newline
+
+    def is_name_line(ln: str) -> bool:
+        return ln.strip().upper().startswith("NAME=")
+
+    had_any = any(is_name_line(ln) for ln in lines)
+
+    nm = (name or "").strip()
+    if not nm:
+        # Remove NAME= lines
+        if not had_any:
+            return False
+        new_lines = [ln for ln in lines if not is_name_line(ln)]
+        new_raw = "\n".join(new_lines)
+        new_raw = _normalize_newlines(new_raw)
+    else:
+        # Replace existing NAME= (first occurrence) and remove duplicates
+        new_lines = []
+        replaced = False
+        for ln in lines:
+            if is_name_line(ln):
+                if not replaced:
+                    new_lines.append(f"NAME={nm}")
+                    replaced = True
+                else:
+                    # Drop duplicate NAME=
+                    continue
+            else:
+                new_lines.append(ln)
+
+        if not replaced:
+            # Insert a new NAME= near the top
+            insert_at = _find_header_insert_index(new_lines)
+            new_lines.insert(insert_at, f"NAME={nm}")
+
+        new_raw = "\n".join(new_lines)
+        new_raw = _normalize_newlines(new_raw)
+
+        if new_raw == raw:
+            return False
+
+    try:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(new_raw)
+    except Exception:
+        return False
+
+    return True
