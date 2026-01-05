@@ -797,9 +797,13 @@ def main_curses(stdscr):
             msg = f"ADT load error: {e}"
             return
 
-        # 3) Only supports 2-bar (32-step) patterns
-        if pat.length != 32:
-            msg = f"StepSeq: length=32(2bar) 패턴만 지원 (현재 {pat.length})"
+        # 3) StepSeq supports 2-bar patterns with 24/32/48 steps:
+        #    - 24 steps (8T)  -> 12 steps/bar
+        #    - 32 steps (16)  -> 16 steps/bar
+        #    - 48 steps (16T) -> 24 steps/bar
+        #    Keep backward compatibility with the legacy 32-step assumption.
+        if int(getattr(pat, "length", 0) or 0) not in (24, 32, 48):
+            msg = f"StepSeq: unsupported length (2bar only): {pat.length} (allowed: 24/32/48)"
             return
 
         # 4) Drum lanes for StepSeq (METHOD B: use the pattern's SLOT definitions)
@@ -828,10 +832,19 @@ def main_curses(stdscr):
             msg = "StepSeq: no SLOT notes found in this ADT"
             return
 
-# 5) StepSeq timing meta
+        # 5) StepSeq timing meta
+        #    Keep the musical length fixed at 2 bars @ 4/4, 480 PPQ:
+        #      loop_len_ticks = 480 * 4 * 2 = 3840
+        #    Then derive step resolution from pat.length (24/32/48).
         loop_len_ticks = 480 * 4 * 2  # 2 bar @ 480 PPQ
-        steps = 32
+        steps = int(getattr(pat, "length", 0) or 0)  # 24 / 32 / 48
+        if steps <= 0:
+            msg = "StepSeq: invalid pattern length"
+            return
         step_ticks = loop_len_ticks // steps
+        steps_per_bar = steps // 2  # 12 / 16 / 24 (2-bar patterns only)
+
+
 
         meta = aps_stepseq.PatternMeta(
             name=fname,
@@ -841,6 +854,14 @@ def main_curses(stdscr):
             loop_start_tick=0,
             bars=2,
         )
+        # Attach optional resolution hints for future StepSeq UI upgrades.
+        # (Safe even if aps_stepseq.PatternMeta does not define these fields.)
+        try:
+            setattr(meta, "steps", steps)
+            setattr(meta, "steps_per_bar", steps_per_bar)
+        except Exception:
+            pass
+
 
         # 6) pat.grid -> DrumEvent list
         #    IMPORTANT: preserve the original accent level from ADT v2.2a:
