@@ -434,3 +434,66 @@ def handle_chain_keys(
             return chain_selected_idx, True
 
     return chain_selected_idx, updated
+
+
+# ----------------------------------------------------------------------
+# Display helpers (used by aps_main / UI; no side effects on editing logic)
+# ----------------------------------------------------------------------
+
+def format_chain_title(chain: List[ChainEntry], count_in_bars: int = 0) -> str:
+    """
+    Build a friendly title line for the Pattern Chain window.
+
+    Example:
+      ▶ Pattern Chain — Items=9, Unique=7, Bars=17, CI=1b
+    """
+    try:
+        from aps_core import compute_chain_metrics
+        items, uniq, bars = compute_chain_metrics(chain)
+    except Exception:
+        items = len(chain) if chain else 0
+        uniq = len({e.filename for e in chain}) if chain else 0
+        bars = 0
+
+    ci = max(0, int(count_in_bars or 0))
+    return f"▶ Pattern Chain — Items={items}, Unique={uniq}, Bars={bars}, CI={ci}b"
+
+
+def format_chain_line(idx_1based: int, start_bar_1based: int, entry: ChainEntry) -> str:
+    """
+    Format one chain line using Option 1:
+      - Left index remains item number (01, 02, ...)
+      - Start bar is shown in parentheses: (b01), (b05), ...
+      - Section label (if any) stays as [Section] prefix
+      - Pattern filename and xN repeats keep the existing style
+
+    Example:
+      01 (b01): [Verse] AFC_P002.ADT x1
+    """
+    sec = getattr(entry, "section", None)
+    sec_txt = f"[{sec}] " if sec else ""
+    fn = getattr(entry, "filename", "")
+    rep = int(getattr(entry, "repeats", 1) or 1)
+    return f"{idx_1based:02d} (b{start_bar_1based:02d}): {sec_txt}{fn} x{rep}"
+
+
+def build_chain_display_lines(chain: List[ChainEntry], count_in_bars: int = 0):
+    """
+    Convenience wrapper:
+      returns (title_line, lines[])
+    """
+    try:
+        from aps_core import compute_chain_start_bars
+        starts = compute_chain_start_bars(chain)
+    except Exception:
+        starts = []
+        cur = 1
+        for e in chain:
+            starts.append(cur)
+            # fallback: assume 2 bars per entry * repeats
+            rep = int(getattr(e, "repeats", 1) or 1)
+            cur += 2 * rep
+
+    title = format_chain_title(chain, count_in_bars=count_in_bars)
+    lines = [format_chain_line(i + 1, starts[i], e) for i, e in enumerate(chain)]
+    return title, lines

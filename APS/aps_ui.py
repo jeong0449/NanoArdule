@@ -17,7 +17,7 @@ APS_UI_CHANGE_NOTE = 'UI: Norton Commander style dialog_confirm/dialog_alert (no
 import curses
 from typing import List, Optional, Tuple
 
-from aps_core import Pattern, ChainEntry, compute_timing, describe_timing, HIT_CHAR
+from aps_core import Pattern, ChainEntry, compute_timing, describe_timing, HIT_CHAR, compute_chain_metrics, compute_chain_start_bars, chain_entry_play_bars
 from aps_sections import ChainSelection, SectionManager
 from aps_countin import get_countin_presets   # (for Help / Count-in menu guidance)
 
@@ -280,17 +280,20 @@ def draw_chain_view(
     - selected_idx: current insertion cursor (always shown even without focus)
     - Focused window shows ▶ before the title; selected line is reverse+bold
     - Unfocused window has a leading space in title; selected line is yellow+bold
-    - countin_label: currently selected Count-in state (e.g., None, SimpleHH...)
+    - countin_label: currently selected Count-in preset name (e.g., None, 1b, SimpleHH...)
     """
     win.erase()
     h, w = win.getmaxyx()
     win.box()
 
-    ci = countin_label or "None"
+    # --- Title metrics (do NOT include count-in into Bars) ---
+    ci = (countin_label or "None")
+    items, unique, bars = compute_chain_metrics(chain)
+
     if focus_chain:
-        title = f" ▶ Pattern Chain (len={chain_len}) — APS v0.27+ [CI:{ci}] "
+        title = f" ▶ Pattern Chain — Items={items}, Unique={unique}, Bars={bars}, CI={ci} "
     else:
-        title = f"   Pattern Chain (len={chain_len}) — APS v0.27+ [CI:{ci}] "
+        title = f"   Pattern Chain — Items={items}, Unique={unique}, Bars={bars}, CI={ci} "
 
     try:
         win.addstr(0, 2, title[:w - 4])
@@ -312,11 +315,40 @@ def draw_chain_view(
 
     sel_range = selection.get_range()
 
+    # Pre-compute start bar numbers (1-based)
+    start_bars = compute_chain_start_bars(chain)
+
+    # Compute section-segment bar lengths (contiguous runs)
+    seg_first_to_bars = {}
+    i = 0
+    while i < len(chain):
+        sec = chain[i].section or ""
+        if not sec:
+            i += 1
+            continue
+        j = i
+        seg_bars = 0
+        while j < len(chain) and (chain[j].section or "") == sec:
+            seg_bars += chain_entry_play_bars(chain[j]) * max(1, int(chain[j].repeats))
+            j += 1
+        seg_first_to_bars[i] = seg_bars
+        i = j
+
     for row in range(start, min(start + max_rows, len(chain))):
         y = 1 + (row - start)
         entry = chain[row]
-        label = f"[{entry.section}] " if entry.section else ""
-        line = f"{row + 1:02d}: {label}{entry.filename} x{entry.repeats}"
+
+        # Section label: reserve a fixed-width "{Nb}" field to keep filenames aligned
+        label = ""
+        if entry.section:
+            if row in seg_first_to_bars:
+                len_field = f"{{{seg_first_to_bars[row]}b}}"
+            else:
+                len_field = " " * 4  # same width as "{5b}"
+            label = f"[{entry.section}{len_field}] "
+
+        sb = start_bars[row] if row < len(start_bars) else 1
+        line = f"{row + 1:02d} (b{sb:02d}): {label}{entry.filename} x{entry.repeats}"
 
         if sel_range and sel_range[0] <= row <= sel_range[1]:
             # Block selection: always reversed

@@ -395,3 +395,69 @@ def set_adt_name(path: str, name: Optional[str]) -> bool:
         return False
 
     return True
+
+
+# --- Chain display utilities (Pattern Chain friendly metrics) -----------------
+# These helpers are UI-agnostic and are intended to be used by aps_main / chain UI
+# to show chain stats like Items/Unique/Bars and per-item start bar indices.
+#
+# NOTE: These functions do NOT modify any existing behavior and are safe to add.
+
+def chain_entry_play_bars(entry) -> int:
+    """
+    Return effective playback bars for a ChainEntry.
+
+    Rules (best-effort, no file I/O):
+      - If filename indicates a half pattern (e.g. *_H001.ADT or *_h001.ADT), return 1
+      - Otherwise return 2
+    """
+    try:
+        fname = getattr(entry, "filename", "")
+    except Exception:
+        fname = ""
+    return 1 if is_h_pattern_filename(os.path.basename(str(fname))) else 2
+
+
+def chain_entry_total_bars(entry) -> int:
+    """Return total bars contributed by one ChainEntry (play_bars * repeats)."""
+    pb = chain_entry_play_bars(entry)
+    try:
+        rep = int(getattr(entry, "repeats", 1))
+    except Exception:
+        rep = 1
+    if rep < 1:
+        rep = 1
+    return pb * rep
+
+
+def compute_chain_metrics(chain: List["ChainEntry"]) -> Tuple[int, int, int]:
+    """
+    Compute (items, unique, bars) for the current chain.
+
+    - items: number of chain entries (lines)
+    - unique: number of unique pattern filenames referenced
+    - bars: total playback bars (half patterns counted as 1 bar)
+    """
+    items = len(chain) if chain else 0
+    if not chain:
+        return 0, 0, 0
+    uniq = len({str(getattr(e, "filename", "")) for e in chain})
+    bars = sum(chain_entry_total_bars(e) for e in chain)
+    return items, uniq, bars
+
+
+def compute_chain_start_bars(chain: List["ChainEntry"]) -> List[int]:
+    """
+    Return a list of 1-based start bar numbers for each chain entry.
+
+    Example:
+      - entry0 starts at bar 1
+      - entry1 starts at bar 1 + bars(entry0)
+      - ...
+    """
+    starts: List[int] = []
+    cur = 1
+    for e in chain:
+        starts.append(cur)
+        cur += chain_entry_total_bars(e)
+    return starts
