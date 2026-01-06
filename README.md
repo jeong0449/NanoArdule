@@ -177,7 +177,7 @@ and consistent runtime behavior.
 # 🚀 Getting Started
 
 ```
-https://github.com/jeong0449/NanoArdule.git
+git clone https://github.com/jeong0449/NanoArdule.git
 cd NanoArdule
 ```
 
