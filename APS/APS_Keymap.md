@@ -1,9 +1,6 @@
-# APS (Ardule Pattern Studio) – Key Map & Controls
+# APS Key Map (Ardule Pattern Studio)
 
-**Last updated:** 2026-01-04
-
-This document summarizes the current key bindings of **APS**,
-with a focus on **Chain Edit** and related workflows.
+Last update: **2026-01-06**
 
 ---
 
@@ -11,130 +8,115 @@ with a focus on **Chain Edit** and related workflows.
 
 | Key | Action |
 |-----|--------|
-| `Q` | Quit APS |
-| `F1` / `H` | Show help |
+| `q` / `F10` | Quit APS |
 | `Space` | Play / Stop |
-| `C` | Cycle pattern suffix: P→B→h→P (h adds PLAY_BARS=1; legacy H also supported) |
-| `S` | Enter Step Sequencer |
-| `B` | Build hybrid pattern |
-| `R` / `r` | Toggle repeat mode *(non-Chain focus only)* |
-| `G` | Genre filter for PAT list (popup: ALL + genres by count) |
+| `H` / `F1` | Help |
+
 ---
 
-## Chain Edit Mode
+## Function Keys
 
-Chain Edit is used to edit the linear, non-looping pattern timeline.
+| Key | Action |
+|-----|--------|
+| `F1` | Help |
+| `F2` | Toggle left list: **Pattern / Arrangement** |
+| `F3` | Refresh (rescan patterns / ARR; keeps filters) |
+| `F4` | Info (show ADT / ARR details) |
+| `F5` | Duplicate Pattern |
+| `F6` | MIDI settings |
+| `F7` | Save ARR |
+| `F8` | Count-in settings |
+| `F9` | BPM |
+| `q` / `F10` | Quit APS |
 
-### Navigation
+---
+
+## Navigation (Common)
 
 | Key | Action |
 |-----|--------|
 | `↑ / ↓` | Move cursor |
 | `J / K` | Move cursor (vi-style) |
-| `Enter` | Confirm / apply |
-| `Esc / Q` | Cancel / exit dialog |
+| `Enter` | Confirm / Apply |
+| `Esc` | Cancel / Exit dialog |
 
 ---
 
-### Block Selection
+## List / Browser
 
 | Key | Action |
 |-----|--------|
-| `V` | Mark block start (set anchor) |
-| *(cursor movement)* | Extend block selection |
-
-> `V` defines the **starting point** of a block in the pattern chain.
-> Moving the cursor extends the block from this anchor.
-> Block selection is shown using **reverse video** (highlight).
+| `G` | Genre filter (Pattern list) |
+| `PgUp / PgDn` | Fast scroll |
+| `C` | Cycle pattern suffix (`P → B → h → P`) |
 
 ---
 
-### Block Editing (Chain Edit only)
+## Chain Edit – Block Selection
 
 | Key | Action |
 |-----|--------|
-| `Y` | Yank (copy) selected block |
-| `X` | Cut selected block |
-| `P` | Paste block or section |
-| `F` | Flush clipboard (clear) |
-| `R` / `r` | Remove section at cursor *(Chain focus only)* |
+| `V` | Set block start (anchor) |
+| *(move cursor)* | Extend block selection |
 
+Block selection is shown using reverse video.
+
+---
+
+## Chain Edit – Block Operations
+
+| Key | Action |
+|-----|--------|
+| `Y` | Yank (copy block) |
+| `X` | Cut block |
+| `P` | Paste (clipboard / section) |
+| `F` | Flush clipboard |
+
+---
+
+## Chain Edit – Section Labels
+
+| Key | Action |
+|-----|--------|
+| `S` | Attach section label at cursor |
+| `R` | Remove section label at cursor |
 
 Notes:
-- `R`/`r` is **focus-aware**:
-  - In **Chain focus**: removes the section at the current cursor line.
-  - Outside Chain focus: toggles **repeat mode**.
-- `Y` copies the selected block and clears the highlight.
-- `X` cuts the block and updates the chain immediately.
-- `P` opens a dialog to choose from:
-  - Clipboard contents
-  - Named sections
-- `F` clears the clipboard without affecting the chain.
+- Section labels are **metadata only** and do not affect playback order.
+- `S` opens a prompt to enter or select a section name.
+- `R` removes the section label at the current chain position.
+- In non-Chain focus, `R` keeps its original meaning.
 
 ---
 
-## Paste Dialog
+## Insert (Focus-aware)
 
-When pressing `P` in Chain Edit:
-
-- A dialog titled **“Paste: choose block”** appears.
-- Available sources:
-  - `[Clipboard]` – last yanked/cut block
-  - `[Section]` – predefined chain sections
-- Use `↑ / ↓` to select, `Enter` to paste, `Esc` to cancel.
-
-If labels are long and truncated in the list,
-a preview area may show the full label below.
+| Focus | Key | Action |
+|-------|-----|--------|
+| ARR list | `Enter` | Insert after cursor |
+| ARR list | `O / o` | Insert before cursor |
+| Pattern list | `Enter` | Insert / increase repeat |
+| Pattern list | `O / o` | Insert before cursor |
 
 ---
 
----
+## Step Sequencer (StepSeq)
 
-## Genre Filter (PAT list)
-
-When the **Patterns (PAT) list** has focus:
-
-- Press `G` to open a Norton Commander–style genre picker.
-- The picker shows:
-  - `ALL` (total pattern count)
-  - Genres sorted by pattern count (descending)
-  - Columns: **3-letter code**, **full name**, **count**
-- Use `↑ / ↓` or `PgUp / PgDn` to navigate, `Enter` to apply, `Esc` to cancel.
-- When a genre is active, the PAT list shows only that genre and the PAT title displays the genre in brackets.
-- Refresh (`F3`) rescans the patterns directory and keeps the current genre filter.
-
-
-## Visual Conventions
-
-- **Reverse video**: block selection only
-- **Bold / color**: current cursor line
-- Clipboard state is shown via status messages
+- Supported grids:
+  - **32-step** (straight)
+  - **24-step** (8T triplet)
+  - **48-step** (16T triplet)
+- Half pattern (`_h`):
+  - `PLAY_BARS = 1`
+  - Second bar is visually disabled but editable
+- Bar separators are explicitly shown
 
 ---
 
-## Design Principles
+## Design Notes (Mental Model)
 
-- The main chain is a **linear time axis** (no implicit loops).
-- Sections are **metadata**, not structural flow control.
-- Clipboard is an explicit, user-managed state.
-- Editing commands are mode-specific to avoid key conflicts.
-
----
-
-_Last updated: 2026-01-04_
-
-
-## List Focus–Specific Insert Keys
-
-When the **file list** has focus (Patterns or ARR):
-
-| Key | List Focus | Action |
-|----|------------|--------|
-| `Enter` | ARR list | Insert selected ARR **after** current chain cursor |
-| `O` / `o` | ARR list | Insert selected ARR **before** current chain cursor |
-| `Enter` | Patterns list | Insert selected pattern **after** cursor (or increase repeats) |
-| `O` / `o` | Patterns list | Insert selected pattern **before** cursor |
-
-Notes:
-- `O` / `o` always means **insert-before** relative to the current chain cursor.
-- Section split (`_L` / `_R`) and ARR section import (`i_` prefix) are applied automatically.
+- **ADT** = Pattern (reusable rhythmic unit)
+- **ARR** = Arrangement (ordered structure of patterns)
+- Chain represents a **linear time axis**
+- Sections are **labels only**
+- Bar counts and positions are **computed**, not stored
