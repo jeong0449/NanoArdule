@@ -1,16 +1,17 @@
-# ================================================================  (EN)
+# ================================================================
 # APS_MAIN - Build/Version Stamp
-# ------------------------------------------------  (EN)
+# ------------------------------------------------
 # BUILD_DATE_KST : 2025-12-17
 # BUILD_TAG      : aps_main-20251217
 # CHANGE_NOTE    : Unified main: NC dialogs, warnings, ARR #COUNTIN, shared MIDI out_port, color re-init.
-# # Tip: If you are using git, also record the commit hash:
-# git rev-parse --short HEAD
-# ================================================================  (EN)
+#
+# Tip: If you are using git, also record the commit hash:
+#   git rev-parse --short HEAD
+# ================================================================
 
 APS_MAIN_BUILD_DATE_KST = "2025-12-17"
 APS_MAIN_BUILD_TAG = "aps_main-20251217"
-APS_MAIN_CHANGE_NOTE = 'Unified main: NC dialogs, warnings, ARR # COUNTIN, shared MIDI out_port, color re-init.'
+APS_MAIN_CHANGE_NOTE = 'Unified main: NC dialogs, warnings, ARR #COUNTIN, shared MIDI out_port, color re-init.'
 
 
 def write_adt_file_v22a(path: str, pat):
@@ -65,7 +66,7 @@ def validate_grid_levels_v22a(pat):
                 raise ValueError(f"grid[{si}][{li}] is not int: {v!r}")
             if iv < 0 or iv > 3:
                 raise ValueError(f"grid[{si}][{li}] out of range 0..3: {iv}")
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 aps_main.py — APS v0.27 main curses loop + Ctrl+Z Undo + block edit + Count-in.
@@ -122,12 +123,12 @@ _GLOBAL_STDSCR_FOR_DIALOGS = None
 
 def cycle_p_b_h(fname: str) -> Optional[tuple[str, str, str]]:
     """
-    Cycle the filename suffix between _P# ## -> _B### -> _h### -> _P###.
+    Cycle the filename suffix between _P### -> _B### -> _h### -> _P###.
 
     Returns (new_name, old_kind, new_kind) where kind is one of 'P','B','h'.
     Example: SWG_P001.ADT -> SWG_B001.ADT -> SWG_h001.ADT -> SWG_P001.ADT
 
-    Note: Legacy _H# ## filenames are still recognized for backward compatibility.
+    Note: Legacy _H### filenames are still recognized for backward compatibility.
     """
     base, ext = os.path.splitext(fname)
     import re
@@ -214,8 +215,8 @@ def main_curses(stdscr):
 
 
     # Pattern root directory:
-    # - If ./patterns exists, prefer that folder
-    # - If missing, use the current directory (".")
+    #   - If ./patterns exists, prefer that folder
+    #   - If missing, use the current directory (".")
     if os.path.isdir("patterns"):
         root = "patterns"
     else:
@@ -482,7 +483,7 @@ def main_curses(stdscr):
                 return load_adp(path)
         except Exception:
             return None
-# ##  (EN)
+###
     def rebuild_composite():
         """bar_sources[0/1] + composite_swap 상태를 바탕으로 composite_pattern 재구성."""
         nonlocal loaded_pattern, composite_pattern, composite_mode, msg
@@ -542,27 +543,27 @@ def main_curses(stdscr):
         composite_mode = True
         msg = f"Composite: {mode_name}"
 
-# ##  (EN)
+###
     def save_composite_pattern():
         """현재 composite_pattern을 HYB_P9xx.ADT (ADT v2.2a 텍스트 포맷)로 저장."""
         nonlocal msg, hyb_next_index, composite_pattern, pattern_files, selected_idx
     
         if not composite_mode or composite_pattern is None:
-            msg = "No composite pattern available."
+            msg = "합성 패턴이 없습니다."
             return
     
         default_base = f"HYB_P{hyb_next_index:03d}"
     
         base = dialog_input(
             stdscr,
-            "Save hybrid pattern:",
+            "하이브리드 패턴 저장:",
             default_text=default_base,
             maxlen=64,
             suffix=".ADT",
         )
     
         if base is None:
-            msg = "Save canceled."
+            msg = "저장이 취소되었습니다."
             return
     
         base = base.strip() or default_base
@@ -572,35 +573,22 @@ def main_curses(stdscr):
         if os.path.exists(path):
             ok = dialog_confirm(
                 stdscr,
-                f"File already exists. Overwrite?\n{filename}",
+                f"이미 존재합니다. 덮어쓸까요?\n{filename}",
                 yes_label="YES",
                 no_label="NO",
                 default_yes=False,
             )
             if not ok:
-                msg = "Save canceled."
+                msg = "저장이 취소되었습니다."
                 return
     
     
         try:
             p = composite_pattern
-            
-            a_file = os.path.splitext(pattern_files[bar_sources[0]])[0]
-            b_file = os.path.splitext(pattern_files[bar_sources[1]])[0]
-
-            if not composite_swap:
-                src1, src2 = a_file, b_file
-            else:
-                src1, src2 = b_file, a_file
-                        
-            p.name = f"{base} (1st: {src1}, 2nd: {src2})"
-            validate_grid_levels_v22a(p)
-            write_adt_file_v22a(path, p)
-                        
             validate_grid_levels_v22a(p)
             write_adt_file_v22a(path, p)
     
-            msg = f"Hybrid pattern saved: {filename}"
+            msg = f"하이브리드 패턴 저장 완료: {filename}"
             hyb_next_index += 1
     
             refresh_pattern_lists(rescan=True)
@@ -610,7 +598,7 @@ def main_curses(stdscr):
                 pass
     
         except Exception as e:
-            msg = f"Hybrid pattern save failed: {e}"
+            msg = f"하이브리드 패턴 저장 실패: {e}"
     
     def load_countin_from_arr(path: str):
         """ARR 파일에서 # Restore countin_idx by reading the COUNTIN header."""
@@ -618,7 +606,7 @@ def main_curses(stdscr):
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
-                    if line.startswith("# COUNTIN"):
+                    if line.startswith("#COUNTIN"):
                         parts = line.strip().split(None, 1)
                         mode_str = parts[1] if len(parts) > 1 else "NONE"
                         if mode_str.upper() == "NONE":
@@ -779,10 +767,10 @@ def main_curses(stdscr):
 
         # 1) This function only works when the pattern list has focus
         if list_mode != "patterns":
-            msg = "StepSeq can only be used from the pattern list."
+            msg = "StepSeq는 패턴 리스트에서만 사용 가능합니다."
             return
         if not pattern_files or not (0 <= selected_idx < len(pattern_files)):
-            msg = "No pattern selected."
+            msg = "선택된 패턴이 없습니다."
             return
 
         fname = pattern_files[selected_idx]
@@ -805,8 +793,8 @@ def main_curses(stdscr):
             return
 
         # 4) Drum lanes for StepSeq (METHOD B: use the pattern's SLOT definitions)
-        # - This avoids hard-coded 8-lane mapping and always reflects the ADT's slot list.
-        # - Preserve slot order as defined in the ADT (you can reverse here if you want KICK at bottom).
+        #    - This avoids hard-coded 8-lane mapping and always reflects the ADT's slot list.
+        #    - Preserve slot order as defined in the ADT (you can reverse here if you want KICK at bottom).
         drum_lanes = []
         note_to_slot = {}
         for i, note in enumerate(getattr(pat, "slot_note", [])):
@@ -846,8 +834,8 @@ def main_curses(stdscr):
         )
 
         # 6) pat.grid -> DrumEvent list
-        # IMPORTANT: preserve the original accent level from ADT v2.2a:
-        # level 0..3  -> representative velocity via aps_stepseq.level_to_vel()
+        #    IMPORTANT: preserve the original accent level from ADT v2.2a:
+        #      level 0..3  -> representative velocity via aps_stepseq.level_to_vel()
         drum_events = []
         for step in range(steps):
             tick = meta.loop_start_tick + step * step_ticks
@@ -988,7 +976,7 @@ def main_curses(stdscr):
 
         # 9) If nothing changed and nothing was saved, exit as-is
         if (not modified) and (not saved):
-            msg = "StepSeq: No changes"
+            msg = "StepSeq: 변경 없음"
             return
         # 10) Clear only drum slots in pat.grid to zeros
         for step in range(steps):
@@ -1064,8 +1052,8 @@ def main_curses(stdscr):
         return True
 
 
-    # 시작 직후 선택된 첫 패턴을 즉시 프리뷰로 로드  (EN)
-    # (초기 상태에서 그리드가 비어 보이는 문제 방지)  (EN)
+    # 시작 직후 선택된 첫 패턴을 즉시 프리뷰로 로드
+    # (초기 상태에서 그리드가 비어 보이는 문제 방지)
     if list_mode == "patterns" and pattern_files:
         load_preview()
 
@@ -1264,7 +1252,7 @@ def main_curses(stdscr):
                 grid_win.addstr(0, x, tag)
             except curses.error:
                 pass
-# ###  (EN)
+####
         # In composite preview, show A/B pattern names and mode
         if composite_mode and len(bar_sources) == 2:
             try:
@@ -1302,7 +1290,7 @@ def main_curses(stdscr):
             except curses.error:
                 pass
 
-# ###  (EN)
+####
         chain_win = stdscr.derwin(
             chain_h, right_w, work_top + grid_h, list_w + 1
         )
@@ -1317,7 +1305,7 @@ def main_curses(stdscr):
             get_countin_label(),
         )
 
-# stdscr.refresh()
+#        stdscr.refresh()
 
         ch = stdscr.getch()
         # --- terminal resize handling ---
@@ -1845,9 +1833,9 @@ def main_curses(stdscr):
 
                 ci_label = get_countin_label()
                 if ci_label in (None, "None"):
-                    header_lines = ["# COUNTIN NONE"]
+                    header_lines = ["#COUNTIN NONE"]
                 else:
-                    header_lines = [f"# COUNTIN {ci_label}"]
+                    header_lines = [f"#COUNTIN {ci_label}"]
 
                 # Build SECTION blocks from in-memory chain labels (1-based, inclusive)
                 section_lines: List[str] = []
@@ -1857,11 +1845,11 @@ def main_curses(stdscr):
                     sec = getattr(e, "section", None)
                     if sec != cur_sec:
                         if cur_sec:
-                            section_lines.append(f"# SECTION {cur_sec} {sec_start} {i-1}")
+                            section_lines.append(f"#SECTION {cur_sec} {sec_start} {i-1}")
                         cur_sec = sec
                         sec_start = i
                 if cur_sec:
-                    section_lines.append(f"# SECTION {cur_sec} {sec_start} {len(chain)}")
+                    section_lines.append(f"#SECTION {cur_sec} {sec_start} {len(chain)}")
 
                 # Build POOL and MAIN (same spirit as aps_arr.save_arr)
                 pool: List[str] = []
@@ -1903,7 +1891,7 @@ def main_curses(stdscr):
                 out_lines: List[str] = []
                 out_lines.extend(header_lines)
                 out_lines.extend(section_lines)
-                out_lines.append("# APS ARR v0.05")
+                out_lines.append("#APS ARR v0.05")
                 out_lines.append("")
                 out_lines.append(f"BPM={bpm}")
                 out_lines.append("")
@@ -1911,9 +1899,9 @@ def main_curses(stdscr):
                     out_lines.append(f"{i}={fn}")
                 out_lines.append("")
                 if play_lines:
-                    out_lines.append("# PLAY")
+                    out_lines.append("#PLAY")
                     out_lines.extend(play_lines)
-                    out_lines.append("# ENDPLAY")
+                    out_lines.append("#ENDPLAY")
                     out_lines.append("")
                 out_lines.append("MAIN|" + ",".join(seq_tokens))
 
@@ -1953,61 +1941,71 @@ def main_curses(stdscr):
                 msg = "Chain is empty."
                 continue
 
-            ok = dialog_confirm(
-                stdscr,
-                "Save ARR file?",
-                yes_label="SAVE",
-                no_label="CANCEL",
-                default_yes=True,
-            )
-            if not ok:
-                msg = "Save canceled."
-                continue
+            # ARR filename (hybrid-style: prefilled default + overwrite confirm)
+            def _next_arr_base(prefix: str = "SONG_", start_no: int = 1) -> str:
+                """Return the next available base name like SONG_001 (without extension)."""
+                import re
+                try:
+                    existing = [f for f in os.listdir(root) if f.lower().endswith(".arr")]
+                except Exception:
+                    existing = []
+                used = set()
+                rx = re.compile(rf"^{re.escape(prefix)}(\d{{3}})\.arr$", re.IGNORECASE)
+                for fn in existing:
+                    m = rx.match(fn)
+                    if m:
+                        try:
+                            used.add(int(m.group(1)))
+                        except Exception:
+                            pass
+                cand = (max(used) + 1) if used else int(start_no)
+                while True:
+                    base0 = f"{prefix}{cand:03d}"
+                    if not os.path.exists(os.path.join(root, base0 + ".ARR")):
+                        return base0
+                    cand += 1
 
-            # ARR filename: re-prompt if empty or already exists
+            default_base = _next_arr_base()
             base = None
             while True:
                 base = dialog_input(
                     stdscr,
-                    "ARR filename:",
-                    default_text="",
+                    "Save ARR file:",
+                    default_text=default_base,
                     maxlen=64,
                     suffix=".ARR",
                 )
                 if base is None:
                     msg = "Save canceled."
+                    base = None
                     break
 
-                base = base.strip()
-                if not base:
-                    try:
-                        dialog_alert(stdscr, "Filename is empty.")
-                    except Exception:
-                        pass
-                    continue
-
+                base = base.strip() or default_base
                 arr_filename = base + ".ARR"
                 path = os.path.join(root, arr_filename)
 
                 if os.path.exists(path):
-                    try:
-                        dialog_alert(
-                            stdscr,
-                            f"File already exists:\n{arr_filename}\n\nPlease enter a different name.",
-                        )
-                    except Exception:
-                        pass
-                    continue
+                    ok = dialog_confirm(
+                        stdscr,
+                        f"File already exists. Overwrite?\n{arr_filename}",
+                        yes_label="YES",
+                        no_label="NO",
+                        default_yes=False,
+                    )
+                    if not ok:
+                        # Re-prompt with the last input as default so the user can edit it.
+                        default_base = base
+                        continue
 
-                # OK
+                # OK (new file or overwrite accepted)
                 break
 
             if base is None:
-                # canceled
                 continue
 
             try:
                 # Save a converted copy reflecting ADP → ADT conversion
+# Save a converted copy reflecting ADP → ADT conversion
                 chain_for_save = [ChainEntry(e.filename, e.repeats) for e in chain]
                 had_adp = False
                 for e in chain_for_save:
@@ -2030,21 +2028,21 @@ def main_curses(stdscr):
                         for raw in f:
                             line = raw.rstrip("\n")
                             if in_play:
-                                if line.strip().upper() == "# ENDPLAY":
+                                if line.strip().upper() == "#ENDPLAY":
                                     in_play = False
                                 continue
-                            if line.strip().upper() == "# PLAY":
+                            if line.strip().upper() == "#PLAY":
                                 in_play = True
                                 continue
-                            if line.startswith("# COUNTIN") or line.startswith("#SECTION"):
+                            if line.startswith("#COUNTIN") or line.startswith("#SECTION"):
                                 continue
                             old_lines.append(line)
 
                     ci_label = get_countin_label()
                     if ci_label in (None, "None"):
-                        header = "# COUNTIN NONE"
+                        header = "#COUNTIN NONE"
                     else:
-                        header = f"# COUNTIN {ci_label}"
+                        header = f"#COUNTIN {ci_label}"
 
                     # derive section blocks from in-memory chain labels
                     section_blocks = []
@@ -2108,18 +2106,18 @@ def main_curses(stdscr):
                     with open(path, "w", encoding="utf-8") as f:
                         f.write(header + "\n")
                         for sec, s2, e2 in section_blocks:
-                            f.write(f"# SECTION {sec} {s2+1} {e2+1}\n")
+                            f.write(f"#SECTION {sec} {s2+1} {e2+1}\n")
                         if play_lines:
-                            f.write("# PLAY\n")
+                            f.write("#PLAY\n")
                             for pl in play_lines:
                                 f.write(pl + "\n")
-                            f.write("# ENDPLAY\n")
+                            f.write("#ENDPLAY\n")
                         prev_blank = False
                         for ln in old_lines:
                             s = ln.strip()
                             # Normalize version tag line
                             if s.startswith("# APS ARR") or s.startswith("#APS ARR"):
-                                f.write("# APS ARR v0.05\n")
+                                f.write("#APS ARR v0.05\n")
                                 prev_blank = False
                                 continue
 
@@ -2883,7 +2881,7 @@ def main_curses(stdscr):
                         except Exception as e:
                             msg = str(e)
                     else:
-                        msg = "File already exists"
+                        msg = "파일이 이미 존재"
             continue
 def main():
     curses.wrapper(main_curses)
