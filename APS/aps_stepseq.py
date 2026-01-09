@@ -23,6 +23,7 @@ APS_STEPSEQ_CHANGE_NOTE = 'StepSeq: cursor-only accent background, NC quit-witho
 # 편집이 끝나면 다시 grid에 반영해서 사용합니다.
 
 import curses
+import os
 from dataclasses import dataclass, field
 from typing import List, Callable, Optional, Tuple
 
@@ -63,6 +64,7 @@ class StepCell:
 class StepLane:
     name: str
     note: int
+    file_path: Optional[str] = None  # absolute/relative ADT path for overwrite confirmation
     cells: List[StepCell] = field(default_factory=list)
 
 
@@ -76,12 +78,11 @@ class PatternMeta:
     bpm: int
     channel: int
     loop_len_ticks: int
+    file_path: Optional[str] = None  # ADT path for overwrite confirmation
     loop_start_tick: int = 0
-    bars: int = 2  # 2 bars
+    bars: int = 2  # 2 bars = 32 steps
 
-    # Resolution hints (backward compatible defaults)
-    steps: int = 32           # total steps in the loop (24/32/48)
-    steps_per_bar: int = 16   # 12/16/24
+
 @dataclass
 class StepGrid:
     lanes: List[StepLane]
@@ -312,21 +313,7 @@ def stepseq_mode(
         except curses.error:
             has_colors = False
     # events -> grid (우리는 APS에서 grid로 변환해서 넘겨도 되지만, 여기서 다시 한번 만들어 씀)
-    # Use meta.steps if provided (24/32/48); keep fallback to 32
-    max_steps = int(getattr(meta, "steps", 32) or 32)
-    if max_steps not in (24, 32, 48):
-        max_steps = 32
-
-    # Derive steps_per_bar (2-bar patterns only) if missing
-    spb = int(getattr(meta, "steps_per_bar", 0) or 0)
-    if spb <= 0:
-        spb = max_steps // 2  # 12 / 16 / 24
-
-    # Normalize meta values
-    meta.steps = max_steps
-    meta.steps_per_bar = spb
-
-    grid, non_grid = _build_stepgrid_from_events(drum_events, meta, drum_lanes=drum_lanes, max_steps=max_steps)
+    grid, non_grid = _build_stepgrid_from_events(drum_events, meta, drum_lanes=drum_lanes)
 
     modified = False
     saved = False
@@ -334,9 +321,7 @@ def stepseq_mode(
 
     cur_lane = 0
     cur_step = 0
-    # One page = one bar (2-bar patterns only)
-    page_size = int(getattr(meta, "steps_per_bar", 16) or 16)  # 12 / 16 / 24
-    page = 0  # 0 = bar1, 1 = bar2
+    page = 0   # 0 = step 0–15, 1 = step 16–31
 
     # NOTE: max_y/max_x are queried inside draw() to stay stable across terminal resizes.
 
@@ -361,8 +346,7 @@ def stepseq_mode(
             cur_step = 0
         if cur_step >= grid.steps:
             cur_step = grid.steps - 1
-        # 2-bar patterns: page is bar index (0 or 1)
-        page = 0 if cur_step < page_size else 1
+        page = 0 if cur_step < 16 else 1
 
     def draw():
         max_y, max_x = stdscr.getmaxyx()
@@ -390,8 +374,8 @@ def stepseq_mode(
         except curses.error:
             pass
 
-        start_step = page * page_size
-        end_step = start_step + page_size
+        start_step = page * 16
+        end_step = start_step + 16
         y_step = 3
         col0 = 8
 
@@ -409,33 +393,7 @@ def stepseq_mode(
                 pass
             col += 3
 
-        # Beat marker row (quarter-note based)
-        beat_gap = 4
-        if page_size == 12:
-            beat_gap = 3
-        elif page_size == 24:
-            beat_gap = 6
-
-        y_beat = y_step + 1
-        try:
-            stdscr.addnstr(y_beat, 1, " " * (max_x - 2), max_x - 2)
-        except curses.error:
-            pass
-
-        col = col0
-        local_idx = 0
-        for _s in range(start_step, end_step):
-            if col + 2 >= max_x - 1:
-                break
-            mark = "|" if (local_idx % beat_gap == 0) else " "
-            try:
-                stdscr.addnstr(y_beat, col, " " + mark, 2)
-            except curses.error:
-                pass
-            col += 3
-            local_idx += 1
-
-        row_start = y_step + 2
+        row_start = y_step + 1
         for li, lane in enumerate(grid.lanes):
             y = row_start + li
             if y >= max_y - 2:
@@ -447,8 +405,6 @@ def stepseq_mode(
 
             col = col0
             for s in range(start_step, end_step):
-                if col + 2 >= max_x - 1:
-                    break
                 cell = lane.cells[s]
                 if cell.on:
                     lvl = vel_to_level(cell.vel)
@@ -528,7 +484,7 @@ def stepseq_mode(
         except curses.error:
             pass
 
-        footer = "Move: arrows/h/j/k/l  Enter:toggle  J/K:vel  [ ]:bar  c:copy bar1->bar2  Space:play  w:save  q/Esc:exit"
+        footer = "Move: arrows/h/j/k/l  Enter:toggle  J/K:vel  [ ]:page  c:copy  Space:play  w:save  q/Esc:exit"
         try:
             stdscr.addnstr(max_y - 2, 1, footer.ljust(max_x - 2), max_x - 2)
         except curses.error:
@@ -595,12 +551,12 @@ def stepseq_mode(
 
         elif key == ord("["):
             page = 0
-            if cur_step >= page_size:
-                cur_step = page_size - 1
+            if cur_step >= 16:
+                cur_step = 15
         elif key == ord("]"):
             page = 1
-            if cur_step < page_size:
-                cur_step = page_size
+            if cur_step < 16:
+                cur_step = 16
 
         elif key == ord("\n"):  # Space / Enter
             cell = grid.lanes[cur_lane].cells[cur_step]
@@ -652,11 +608,10 @@ def stepseq_mode(
                 cell.vel = level_to_vel(lvl)
                 modified = True
         elif key in (ord("c"), ord("C")):
-            # Copy bar1 -> bar2 (page_size steps)
             for lane in grid.lanes:
-                for i in range(page_size):
+                for i in range(16):
                     src = lane.cells[i]
-                    dst = lane.cells[i + page_size]
+                    dst = lane.cells[i + 16]
                     dst.on = src.on
                     dst.vel = src.vel
             modified = True
@@ -680,6 +635,21 @@ def stepseq_mode(
 
 
         elif key in (ord("w"), ord("W")):
+            # Save: if target file exists, confirm overwrite (modal dialog over StepSeq screen)
+            if getattr(meta, "file_path", None):
+                try:
+                    target_path = str(meta.file_path)
+                    if os.path.exists(target_path) and callable(dialog_confirm):
+                        msg = (
+                            f"File already exists. Overwrite?\n\n"
+                            f"{os.path.basename(target_path)}"
+                        )
+                        if not dialog_confirm(stdscr, msg, yes_label="OVERWRITE", no_label="CANCEL", default_yes=False):
+                            # Stay in StepSeq without saving
+                            continue
+                except Exception:
+                    # If anything goes wrong, fall back to legacy behavior (save without confirmation)
+                    pass
             saved = True
             baseline_sig = _grid_signature(grid)
             modified = False
