@@ -229,6 +229,7 @@ def main_curses(stdscr):
     # NOTE: Pattern genre is derived from the first 3 characters of the filename (without extension).
     # This filter is UI-only: it does not rename files or change pattern contents.
     GENRE_FULLNAME = {
+    "HYB": "Hybrid (User Edited)",
         "ALL": "All Patterns",
         "AFC": "Afro-Cuban",
         "BAL": "Ballad",
@@ -545,7 +546,7 @@ def main_curses(stdscr):
 
 ###
     def save_composite_pattern():
-        """현재 composite_pattern을 HYB_P9xx.APT(JSON)으로 저장."""
+        """현재 composite_pattern을 HYB_P9xx.ADT(ADT v2.2a)로 저장."""
         nonlocal msg, hyb_next_index, composite_pattern, pattern_files, selected_idx
 
         if not composite_mode or composite_pattern is None:
@@ -559,7 +560,7 @@ def main_curses(stdscr):
             "Save hybrid pattern:",
             default_text=default_base,
             maxlen=64,
-            suffix=".APT",
+            suffix=".ADT",
         )
 
         if base is None:
@@ -570,28 +571,34 @@ def main_curses(stdscr):
         if not base:
             base = default_base
 
-        t = base + ".APT"
+        t = base + ".ADT"
         path = os.path.join(root, t)
+
+        # Warn before overwriting an existing file
+        if os.path.exists(path):
+            ok = dialog_confirm(
+                stdscr,
+                f"Overwrite existing file?\n{os.path.basename(path)}",
+                yes_label="Overwrite",
+                no_label="Cancel",
+                default_yes=False,
+            )
+            if not ok:
+                msg = "Save cancelled."
+                return
+
 
 
 # Up to here
         try:
             p = composite_pattern
-            data = {
-                "name": p.name,
-                "length": p.length,
-                "slots": p.slots,
-                "grid_type": p.grid_type,
-                "time_sig": p.time_sig,
-                "triplet": p.triplet,
-                "slot_abbr": list(p.slot_abbr),
-                "slot_note": list(p.slot_note),
-                "slot_name": list(p.slot_name),
-                "grid": p.grid,
-            }
-            with open(path, "w", encoding="utf-8") as f:
-                import json as _json  # Local import (same JSON schema as aps_core)
-                _json.dump(data, f, ensure_ascii=False, indent=2)
+                        # Ensure the saved ADT carries the chosen base name
+            p.name = base
+
+            # Save as ADT v2.2a (text)
+            validate_grid_levels_v22a(p)
+            write_adt_file_v22a(path, p)
+
 
             msg = f"Saved hybrid pattern: {t}"
             hyb_next_index += 1
