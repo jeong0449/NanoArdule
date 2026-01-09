@@ -584,6 +584,19 @@ def main_curses(stdscr):
     
         try:
             p = composite_pattern
+            
+            a_file = os.path.splitext(pattern_files[bar_sources[0]])[0]
+            b_file = os.path.splitext(pattern_files[bar_sources[1]])[0]
+
+            if not composite_swap:
+                src1, src2 = a_file, b_file
+            else:
+                src1, src2 = b_file, a_file
+                        
+            p.name = f"{base} (1st: {src1}, 2nd: {src2})"
+            validate_grid_levels_v22a(p)
+            write_adt_file_v22a(path, p)
+                        
             validate_grid_levels_v22a(p)
             write_adt_file_v22a(path, p)
     
