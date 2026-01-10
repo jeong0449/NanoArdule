@@ -152,6 +152,8 @@ ADP uses four discrete velocity (accent) levels:
   - PPQ
   - External BPM
 
+ADP playback engines MUST NOT assume any specific time signature.
+
 ADP **does not define tempo changes**.
 
 ---
@@ -163,7 +165,7 @@ ADP intentionally excludes:
 - Tempo ownership
 - Song structure
 - Pattern chaining
-- Time signatures beyond grid semantics
+- Explicit time signature definitions
 - Real-time control changes
 
 These concerns are handled by higher-level formats (ARR, ADS) or runtime configuration.
