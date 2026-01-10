@@ -2291,6 +2291,12 @@ def main_curses(stdscr):
                 continue
 
 # Default handling for chain keys (move, single-line delete/repeat, O/o, etc.)
+
+            # --- Block selection UX: show a status message when V sets the block start ---
+            prev_rng = selection.get_range()
+            prev_anchor = getattr(selection, "start", None)
+
+            # Default handling for chain keys (move, single-line delete/repeat, O/o, etc.)
             chain_selected_idx, changed = handle_chain_keys(
                 ch,
                 chain,
@@ -2301,6 +2307,19 @@ def main_curses(stdscr):
                 selected_idx,
                 push_undo,
             )
+
+            # If user pressed V, reflect the selection state on the status bar.
+            if ch in (ord("v"), ord("V")):
+                cur_rng = selection.get_range()
+                cur_anchor = getattr(selection, "start", None)
+
+                if cur_anchor is not None and prev_anchor is None and not prev_rng:
+                    msg = "Block start set."
+                elif cur_rng and cur_rng != prev_rng:
+                    msg = f"Block range: {cur_rng[0]+1}..{cur_rng[1]+1}"
+                elif cur_anchor is None and prev_anchor is not None:
+                    msg = "Block selection cleared."
+       
             if ch == ord("s"):
                 rng = selection.get_range()
                 if rng:
