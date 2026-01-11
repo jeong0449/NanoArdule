@@ -786,12 +786,6 @@ def main_curses(stdscr):
         except Exception as e:
             msg = f"ADT load error: {e}"
             return
-
-        # 3) Only supports 2-bar (32-step) patterns
-        if pat.length != 32:
-            msg = f"StepSeq: length=32(2bar) 패턴만 지원 (현재 {pat.length})"
-            return
-
         # 4) Drum lanes for StepSeq (METHOD B: use the pattern's SLOT definitions)
         #    - This avoids hard-coded 8-lane mapping and always reflects the ADT's slot list.
         #    - Preserve slot order as defined in the ADT (you can reverse here if you want KICK at bottom).
@@ -818,26 +812,50 @@ def main_curses(stdscr):
             msg = "StepSeq: no SLOT notes found in this ADT"
             return
 
-# 5) StepSeq timing meta
-        loop_len_ticks = 480 * 4 * 2  # 2 bar @ 480 PPQ
-        steps = 32
-        step_ticks = loop_len_ticks // steps
+# 5) StepSeq timing meta (meter-agnostic; derived from step count + grid)
+        PPQ = 480
+
+        steps = int(getattr(pat, "length", 0) or 0)
+        if steps <= 0:
+            msg = "StepSeq: invalid pattern length"
+            return
+
+        grid_code = str(getattr(pat, "grid_type", "") or "").upper()
+
+        # Infer steps_per_bar for UI + playback preview
+        if "16T" in grid_code:
+            steps_per_bar = 24
+        elif "8T" in grid_code:
+            steps_per_bar = 12
+        else:
+            steps_per_bar = 16
+
+        # bars is display/preview only
+        if steps % steps_per_bar == 0:
+            bars = max(1, steps // steps_per_bar)
+        else:
+            bars = max(1, int(round(steps / float(steps_per_bar))))
+
+        # Preview loop: assume 4 beats per bar (quarter-note beats)
+        loop_len_ticks = PPQ * 4 * bars
+        step_ticks = max(1, int(loop_len_ticks // steps))
 
         meta = aps_stepseq.PatternMeta(
             name=fname,
-            file_path=path,
-            bpm=bpm,
+bpm=bpm,
             channel=9,  # CH10 (0-based)
             loop_len_ticks=loop_len_ticks,
             loop_start_tick=0,
-            bars=2,
+            bars=bars,
+            steps=steps,
+            steps_per_bar=steps_per_bar,
         )
-
         # 6) pat.grid -> DrumEvent list
         #    IMPORTANT: preserve the original accent level from ADT v2.2a:
         #      level 0..3  -> representative velocity via aps_stepseq.level_to_vel()
         drum_events = []
-        for step in range(steps):
+        max_step = min(steps, len(getattr(pat, "grid", []) or []))
+        for step in range(max_step):
             tick = meta.loop_start_tick + step * step_ticks
             row = pat.grid[step]
             for note, slot_idx in note_to_slot.items():
@@ -979,7 +997,7 @@ def main_curses(stdscr):
             msg = "StepSeq: 변경 없음"
             return
         # 10) Clear only drum slots in pat.grid to zeros
-        for step in range(steps):
+        for step in range(max_step):
             row = pat.grid[step]
             for slot_idx in note_to_slot.values():
                 if 0 <= slot_idx < len(row):
