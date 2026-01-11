@@ -75,13 +75,14 @@ UI, editor, domain-logic, and tool modules.
 **[aps_stepseq.py](./aps_stepseq.py)**
 - ADT step sequencer editor
 - grid rendering and cursor movement
-- visual block selection, copy, and edit operations
+- view window / visible-bar selection (what part of the pattern is shown)
 - velocity/accent manipulation
 - pattern-level save workflow
 
 **[aps_chainedit.py](./aps_chainedit.py)**
 - ARR chain editor
 - pattern insertion, deletion, duplication, repetition
+- block selection + cut/copy/paste-style edit operations (chain-level)
 - section-aware editing
 - interaction layer between ARR structure and UI
 
