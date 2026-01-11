@@ -1,208 +1,214 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-adc-arrtool.py
-Convert APS ARR files to MIDI (Type 0) and/or ADS (simple event stream).
-
-Defaults:
-  - patterns dir: ./patterns (if missing, fall back to <ARR dir>/patterns if present)
-  - velocity map: 0,40,80,110  (ADT levels 0..3 -> MIDI velocity)
-"""
 
 from __future__ import annotations
 
-import argparse
-import os
-import re
-import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import argparse
+import re
+import struct
 
 try:
     import mido
-except ImportError:
+except Exception:
     mido = None
 
 
-# Some Web MIDI players may miss events scheduled exactly at tick 0.
-# We start the generated count-in 1 tick late to avoid dropping the first hit.
-COUNTIN_START_OFFSET_TICKS = 1
+METATIME_NAME = "MetaTime"
 
-
-# ----------------------------
-# ARR parsing
-# ----------------------------
 
 @dataclass
 class ArrFile:
-    bpm: int = 120
-    mapping: Dict[int, str] = None
-    main: List[int] = None
-    countin_name: Optional[str] = None
+    bpm: int
+    mapping: Dict[int, str]
+    main: List[int]
+    # count-in length in beats (TS denominator unit)
+    #  0 : off
+    # -1 : enabled but "default length" (1 bar = TS numerator beats)
+    countin_beats: int
 
-
-def parse_arr(path: Path) -> ArrFile:
-    """
-    Parse a minimal subset of APS ARR that is sufficient for conversion:
-      - BPM=...
-      - N=FILENAME.ADT
-      - MAIN|1,2,3,...
-      - optional #COUNTIN name
-    """
-    bpm = 120
-    mapping: Dict[int, str] = {}
-    main: List[int] = []
-    countin_name: Optional[str] = None
-
-    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    for raw in lines:
-        line = raw.strip()
-        if not line:
-            continue
-
-        if line.startswith("#COUNTIN"):
-            # e.g. "#COUNTIN CountIn_HH"
-            parts = line.split(maxsplit=1)
-            if len(parts) == 2:
-                countin_name = parts[1].strip()
-            continue
-
-        if line.startswith("#"):
-            continue
-
-        if line.upper().startswith("BPM="):
-            try:
-                bpm = int(line.split("=", 1)[1].strip())
-            except Exception:
-                pass
-            continue
-
-        # mapping: "1=RCK_P001.ADT"
-        m = re.match(r"^(\d+)\s*=\s*(.+)$", line)
-        if m:
-            idx = int(m.group(1))
-            fname = m.group(2).strip()
-            mapping[idx] = fname
-            continue
-
-        # main chain: "MAIN|1,2,3"
-        if line.upper().startswith("MAIN|"):
-            rhs = line.split("|", 1)[1].strip()
-            if rhs:
-                parts = [p.strip() for p in rhs.split(",") if p.strip()]
-                for p in parts:
-                    try:
-                        main.append(int(p))
-                    except Exception:
-                        raise ValueError(f"Invalid MAIN entry: {p!r}")
-            continue
-
-    if not main:
-        raise ValueError("ARR has no MAIN|... chain. MAIN is required.")
-    if not mapping:
-        raise ValueError("ARR has no pattern mapping lines like '1=XXXX.ADT'.")
-
-    return ArrFile(bpm=bpm, mapping=mapping, main=main, countin_name=countin_name)
-
-
-# ----------------------------
-# ADT parsing (v2.2a-like)
-# ----------------------------
 
 @dataclass
 class AdtPattern:
     name: str
-    length: int                 # steps in the full grid file (often 32 for 2 bars)
-    play_bars: int              # 1 or 2 (or more), used for chaining time
+    path_stem: str
+    grid: str
+    length: int
+    play_bars: int
+    time_sig_n: int
+    time_sig_d: int
     slots: int
-    slot_notes: List[int]       # MIDI note per slot index
-    grid_levels: List[List[int]]  # [step][slot] 0..3
-    grid_type: str = "16"
+    notes: List[int]
+    grid_levels: List[List[int]]
 
 
-def _infer_play_bars_from_filename(stem: str) -> Optional[int]:
-    # Convention in this project: "_h###" or "_H###" indicates half (1-bar) usage.
-    # Examples: RCK_h901, END_h007
+Event = Tuple[int, str, int, int]  # (abs_tick, kind, a, b)
+
+
+def grid_to_subdiv(grid: str) -> int:
+    g = (grid or "16").strip().upper()
+    if g == "8T":
+        return 3
+    if g == "16T":
+        return 6
+    return 4
+
+
+def infer_play_bars_from_filename(stem: str) -> Optional[int]:
     if re.search(r"_[hH]\d{3}$", stem):
         return 1
     return None
 
 
+def parse_time_sig(header: Dict[str, str]) -> Tuple[int, int]:
+    if "TIME_SIG" in header:
+        m = re.match(r"^\s*(\d+)\s*/\s*(\d+)\s*$", header["TIME_SIG"])
+        if m:
+            n, d = int(m.group(1)), int(m.group(2))
+            if n > 0 and d > 0:
+                return n, d
+    return 4, 4
+
+
+def parse_velmap(s: Optional[str]) -> List[int]:
+    if not s:
+        return [0, 40, 80, 110]
+    parts = [p.strip() for p in s.split(",")]
+    if len(parts) != 4:
+        raise ValueError('velmap must be "0,40,80,110" (4 ints)')
+    out: List[int] = []
+    for p in parts:
+        v = int(p)
+        if v < 0 or v > 127:
+            raise ValueError("velmap values must be 0..127")
+        out.append(v)
+    return out
+
+
+def velocity_from_level(level: int, velmap: List[int]) -> int:
+    lvl = max(0, min(3, int(level)))
+    return int(velmap[lvl])
+
+
+def ticks_per_beat_from_ts(ppq: int, den: int) -> int:
+    # Beat is defined as the TS denominator note.
+    return max(1, int(round(ppq * (4.0 / float(den)))))
+
+
+def parse_arr(path: Path) -> ArrFile:
+    bpm = 120
+    mapping: Dict[int, str] = {}
+    main: List[int] = []
+    countin_beats = 0
+
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    for raw in lines:
+        s = raw.strip()
+        if not s:
+            continue
+
+        # ARR meta: #COUNTIN ...
+        # Accept:
+        #   #COUNTIN CountIn_HH
+        #   #COUNTIN CountIn_HH 4
+        #   #COUNTIN 4
+        m_ci = re.match(r"^\s*#COUNTIN(?:\s+(\S+))?(?:\s+(\d+))?\s*$", s, flags=re.IGNORECASE)
+        if m_ci:
+            if m_ci.group(2) is not None:
+                countin_beats = max(0, int(m_ci.group(2)))
+            else:
+                countin_beats = -1  # enabled; default length decided later from TS
+            continue
+
+        # other comments
+        if s.startswith("#"):
+            continue
+
+        u = s.upper()
+        if u.startswith("BPM="):
+            try:
+                bpm = int(s.split("=", 1)[1].strip())
+            except Exception:
+                pass
+            continue
+
+        if u.startswith("MAIN|"):
+            rhs = s.split("|", 1)[1].strip()
+            for part in rhs.split(","):
+                part = part.strip()
+                if part:
+                    main.append(int(part))
+            continue
+
+        # mapping: "1=RCK_P001.ADT"
+        if "=" in s:
+            k, v = s.split("=", 1)
+            try:
+                idx = int(k.strip())
+            except Exception:
+                continue
+            mapping[idx] = v.strip().strip('"')
+
+    if not main:
+        raise ValueError("ARR has no MAIN| chain.")
+    return ArrFile(bpm=bpm, mapping=mapping, main=main, countin_beats=countin_beats)
+
+
 def parse_adt(path: Path) -> AdtPattern:
-    """
-    Parse ADT text (APS/ADT v2.2a-style). Robust to the absence of a blank line
-    between header and grid.
-
-    Header keys:
-      NAME=...
-      GRID=...
-      LENGTH=...
-      SLOTS=...
-      PLAY_BARS=... (optional)
-      SLOTn=ABBR@NOTE,NAME  (NOTE is the MIDI note number)
-    Grid:
-      lines of symbols using . - x o (case-insensitive)
-    """
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    lines = text.splitlines()
-
     header: Dict[str, str] = {}
-    slot_notes: Dict[int, int] = {}
     grid_lines: List[str] = []
 
     in_grid = False
-    for raw in lines:
-        line = raw.rstrip("\n")
-        s = line.strip()
+    seen_header = False
 
-        if not s:
-            # Empty lines may exist; ignore them
+    raw_lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    for raw in raw_lines:
+        s = raw.rstrip("\r\n")
+
+        if not in_grid and not s.strip():
+            continue
+        if not in_grid and not seen_header and s.lstrip().startswith(";"):
             continue
 
         if not in_grid:
-            # Header region
-            if s.startswith(";"):
-                continue
-
             if "=" in s:
                 k, v = s.split("=", 1)
                 header[k.strip().upper()] = v.strip()
+                seen_header = True
                 continue
+            if seen_header and s.strip():
+                in_grid = True
 
-            # First non-empty, non-comment line without '=' is treated as the first grid row
-            in_grid = True
-            grid_lines.append(s)
-            continue
+        if in_grid and s.strip():
+            grid_lines.append(s.rstrip())
 
-        # Grid region
-        grid_lines.append(s)
-
-    # ---- Interpret header ----
-    name = header.get("NAME") or path.stem
-    grid_type = header.get("GRID", "16")
+    name = header.get("NAME", path.stem)
+    grid = header.get("GRID", "16").strip()
+    time_sig_n, time_sig_d = parse_time_sig(header)
 
     try:
-        length = int(header.get("LENGTH", "32"))
+        length = int(header.get("LENGTH", "32").strip())
     except Exception:
         length = 32
 
     try:
-        slots = int(header.get("SLOTS", "12"))
+        slots = int(header.get("SLOTS", "12").strip())
     except Exception:
         slots = 12
 
-    # PLAY_BARS (optional)
     play_bars: Optional[int] = None
     if "PLAY_BARS" in header:
         try:
-            play_bars = int(header["PLAY_BARS"])
+            play_bars = int(header["PLAY_BARS"].strip())
         except Exception:
             play_bars = None
     if play_bars is None:
-        play_bars = _infer_play_bars_from_filename(path.stem) or 2
+        play_bars = infer_play_bars_from_filename(path.stem) or 2
 
-    # Slot notes from SLOTn lines (look for "@<note>")
+    # SLOT parsing: extract @NN anywhere (supports "KK@36,KICK")
+    slot_pairs: List[Tuple[int, int]] = []
     for k, v in header.items():
         if not k.startswith("SLOT"):
             continue
@@ -211,418 +217,365 @@ def parse_adt(path: Path) -> AdtPattern:
             continue
         idx = int(m.group(1))
         mm = re.search(r"@(\d+)", v)
-        if mm:
-            slot_notes[idx] = int(mm.group(1))
+        note = int(mm.group(1)) if mm else 0
+        slot_pairs.append((idx, note))
 
-    notes = [slot_notes.get(i, 0) for i in range(slots)]    # Grid levels
-    sym_map = {".": 0, "-": 1, "x": 2, "o": 3, "X": 2, "O": 3}
-    grid_levels: List[List[int]] = []
+    if slot_pairs:
+        max_idx = max(i for (i, _) in slot_pairs)
+        if max_idx + 1 > slots:
+            slots = max_idx + 1
 
-    orientation = header.get("ORIENTATION", "STEP").strip().upper()
+    notes = [0] * slots
+    for idx, note in slot_pairs:
+        if 0 <= idx < len(notes):
+            notes[idx] = note
+
+    max_row_len = max((len(r) for r in grid_lines), default=0)
+    if max_row_len > slots:
+        notes.extend([0] * (max_row_len - slots))
+        slots = max_row_len
 
     def ch_to_lvl(ch: str) -> int:
-        return sym_map.get(ch, 0)
+        c = (ch or ".").strip().lower()[:1]
+        return {".": 0, "-": 1, "x": 2, "o": 3}.get(c, 0)
 
-    if orientation in ("LANE", "SLOT", "TRACK"):
-        # grid_lines are lanes (one line per slot), each line length ~= LENGTH
-        # Convert to step-major [step][slot]
-        for step in range(length):
-            row: List[int] = []
-            for slot in range(slots):
-                line = grid_lines[slot] if slot < len(grid_lines) else ""
-                ch = line[step] if step < len(line) else "."
-                row.append(ch_to_lvl(ch))
-            grid_levels.append(row)
-    else:
-        # Default: STEP orientation (one line per step), each line length ~= SLOTS
-        # If the file *looks* like LANE (len(grid_lines)==slots and lines are long), auto-detect.
-        looks_like_lane = (len(grid_lines) == slots and any(len(gl) > slots for gl in grid_lines))
-        if looks_like_lane:
-            for step in range(length):
-                row: List[int] = []
-                for slot in range(slots):
-                    line = grid_lines[slot] if slot < len(grid_lines) else ""
-                    ch = line[step] if step < len(line) else "."
-                    row.append(ch_to_lvl(ch))
-                grid_levels.append(row)
-        else:
-            for i in range(min(length, len(grid_lines))):
-                row_s = grid_lines[i]
-                row: List[int] = []
-                for j in range(slots):
-                    ch = row_s[j] if j < len(row_s) else "."
-                    row.append(ch_to_lvl(ch))
-                grid_levels.append(row)
+    grid_levels: List[List[int]] = []
+    for row in grid_lines[:length]:
+        row2 = row.ljust(slots, ".")[:slots]
+        grid_levels.append([ch_to_lvl(c) for c in row2])
 
     while len(grid_levels) < length:
         grid_levels.append([0] * slots)
 
     return AdtPattern(
         name=name,
+        path_stem=path.stem,
+        grid=grid,
         length=length,
-        play_bars=play_bars,
-        slots=slots,
-        slot_notes=notes,
+        play_bars=int(play_bars),
+        time_sig_n=int(time_sig_n),
+        time_sig_d=int(time_sig_d),
+        slots=int(slots),
+        notes=notes,
         grid_levels=grid_levels,
-        grid_type=grid_type,
     )
 
 
-def build_countin_events(ppq: int, hihat_note: int = 42, velocity: int = 80,
-                         gate_ratio: float = 0.5, time_sig_n: int = 4, time_sig_d: int = 4) -> Tuple[List[Tuple[int, str, int, int]], int]:
+def build_countin_events(ppq: int,
+                         time_sig_n: int,
+                         time_sig_d: int,
+                         countin_beats: int,
+                         start_tick_offset: int = 1,
+                         hihat_note: int = 42,
+                         velocity: int = 80,
+                         gate_ratio: float = 0.5) -> Tuple[List[Event], int]:
     """
-    Build a 1-bar count-in: closed hi-hat hit once per beat (4 hits in 4/4).
-    Returns (events, duration_ticks).
+    Count-in by beats (not bars).
+    Beat is TS denominator note.
+    Tick=1 offset applies ONLY to count-in.
     """
-    ticks_per_beat = int(ppq)
-    ticks_per_bar = int(round(ticks_per_beat * time_sig_n * (4 / time_sig_d)))
-    gate_ticks = max(1, int(ticks_per_beat * gate_ratio * 0.5))  # shorter than a beat
+    beats = max(0, int(countin_beats))
+    if beats == 0:
+        return [], 0
 
-    events: List[Tuple[int, str, int, int]] = []
-    for b in range(time_sig_n):
-        t = COUNTIN_START_OFFSET_TICKS + b * ticks_per_beat  # start slightly after tick 0
-        events.append((t, "on", int(hihat_note), int(velocity)))
-        events.append((t + gate_ticks, "off", int(hihat_note), 0))
+    tpb = ticks_per_beat_from_ts(ppq, time_sig_d)
+    gate_ticks = max(1, int(round(tpb * gate_ratio)))
+    length_ticks = beats * tpb
 
-    events.sort(key=lambda x: (x[0], 0 if x[1] == "off" else 1, x[2]))
-    return events, ticks_per_bar
+    events: List[Event] = []
+    for i in range(beats):
+        t = start_tick_offset + i * tpb
+        events.append((t, "on", hihat_note, int(velocity)))
+        events.append((t + gate_ticks, "off", hihat_note, 0))
 
-# ----------------------------
-# Conversion helpers
-# ----------------------------
-
-
-def resolve_countin_path(patterns_dir: Path, countin_name: str) -> Path:
-    """
-    Resolve count-in pattern reference to an actual .ADT file path.
-    The ARR may store a bare name like 'CountIn_HH' (no extension).
-    """
-    name = countin_name.strip()
-    if not name:
-        return patterns_dir / "__MISSING__.ADT"
-    if name.lower().endswith(".adt"):
-        return patterns_dir / name
-    return patterns_dir / (name + ".ADT")
-
-def resolve_patterns_dir(arr_path: Path, patterns_dir_arg: Optional[str]) -> Path:
-    if patterns_dir_arg:
-        return Path(patterns_dir_arg)
-    # default: ./patterns
-    p1 = Path("patterns")
-    if p1.is_dir():
-        return p1
-    # fallback: <ARR dir>/patterns
-    p2 = arr_path.parent / "patterns"
-    if p2.is_dir():
-        return p2
-    # as a last resort, still use ./patterns
-    return p1
+    return events, length_ticks
 
 
-def build_timeline_events(
-    patterns: List[AdtPattern],
-    velocity_map: List[int],
-    ppq: int,
-    drum_channel: int = 9,
-    gate_ratio: float = 0.5,
-    time_sig_n: int = 4,
-    time_sig_d: int = 4,
-) -> List[Tuple[int, str, int, int]]:
-    """
-    Build a flat list of (abs_tick, kind, note, velocity).
-    kind: "on" or "off".
-    """
-    events: List[Tuple[int, str, int, int]] = []
-
-    ticks_per_beat = ppq
-    # 16th note tick length for 4/4: PPQ / 4
-    # We assume the ADT "step" corresponds to 1/16 if length=32 for 2 bars in 4/4.
-    # More generally, we compute step_ticks from steps_per_bar:
-    # ticks_per_bar = PPQ * beats_per_bar (e.g., 480*4=1920)
-    ticks_per_bar = ticks_per_beat * time_sig_n * (4 / time_sig_d)
-
+def build_timeline_events(patterns: List[AdtPattern],
+                          ppq: int,
+                          velmap: List[int],
+                          gate_ratio: float,
+                          verbose: bool) -> List[Event]:
+    events: List[Event] = []
     cur_tick = 0
+    prev_ts: Optional[Tuple[int, int]] = None
 
-    for pat in patterns:
-        play_bars = max(1, int(pat.play_bars))
-        steps_total = int(pat.length)
+    for p in patterns:
+        ts = (p.time_sig_n, p.time_sig_d)
+        subdiv = grid_to_subdiv(p.grid)
 
-        # Determine how many bars the *file grid* represents, independent of play_bars.
-        # Half patterns often keep a 2-bar grid (length=32 or 24) but set play_bars=1.
-        # If we naively divide by play_bars, a half pattern becomes '32 steps per bar' and sounds wrong.
-        if steps_total in (32, 24):
-            file_bars = 2
-        elif steps_total in (16, 12):
-            file_bars = 1
-        else:
-            # best-effort heuristic
-            file_bars = 2 if steps_total >= 24 else 1
+        ticks_per_bar = int(round(ppq * ts[0] * (4.0 / ts[1])))
+        steps_per_bar = max(1, ts[0] * subdiv)
+        steps_to_play = max(1, steps_per_bar * p.play_bars)
+        step_ticks = max(1, int(round(ticks_per_bar / steps_per_bar)))
+        gate_ticks = max(1, int(round(step_ticks * gate_ratio)))
 
-        steps_per_bar = max(1, steps_total // file_bars)
-        step_ticks = int(round(ticks_per_bar / steps_per_bar))
-        gate_ticks = max(1, int(step_ticks * gate_ratio))
+        if prev_ts is None or prev_ts != ts:
+            events.append((cur_tick, "meta_ts", ts[0], ts[1]))
+            prev_ts = ts
 
-        # Play only the requested number of bars from the file grid
-        steps_to_play = min(steps_total, steps_per_bar * play_bars)
+        if verbose:
+            print(
+                f"[{METATIME_NAME}] PAT {p.path_stem} | TS={ts[0]}/{ts[1]} | GRID={p.grid} "
+                f"(subdiv={subdiv}) | PLAY_BARS={p.play_bars} | "
+                f"steps/bar={steps_per_bar} | steps(play)={steps_to_play} | "
+                f"ticks/bar={ticks_per_bar} | step_ticks={step_ticks}"
+            )
 
-        for s in range(steps_to_play):
-            abs_t = cur_tick + s * step_ticks
-            levels = pat.grid_levels[s]
-            for slot_idx, lvl in enumerate(levels):
-                if lvl <= 0:
+        steps_render = min(steps_to_play, p.length)
+        for s in range(steps_render):
+            base = cur_tick + s * step_ticks
+            levels = p.grid_levels[s]
+            limit = min(len(levels), len(p.notes))
+            for i in range(limit):
+                lvl = levels[i]
+                note = p.notes[i]
+                if lvl <= 0 or note <= 0:
                     continue
-                note = int(pat.slot_notes[slot_idx])
-                if note <= 0:
-                    continue
-                vel = int(velocity_map[min(3, max(0, lvl))])
-                # note_on
-                events.append((abs_t, "on", note, vel))
-                # note_off
-                events.append((abs_t + gate_ticks, "off", note, 0))
+                vel = velocity_from_level(lvl, velmap)
+                events.append((base, "on", note, vel))
+                events.append((base + gate_ticks, "off", note, 0))
 
-        # advance time by played bars
-        cur_tick += int(play_bars * ticks_per_bar)
+        cur_tick += steps_to_play * step_ticks
 
-    # Sort by abs tick, with note_off before note_on at same tick to avoid stuck notes
-    events.sort(key=lambda x: (x[0], 0 if x[1] == "off" else 1, x[2]))
+    order = {"meta_ts": 0, "on": 1, "off": 2}
+    events.sort(key=lambda e: (e[0], order.get(e[1], 9)))
     return events
 
 
-def write_midi_type0(
-    out_path: Path,
-    bpm: int,
-    events: List[Tuple[int, str, int, int]],
-    ppq: int,
-    drum_channel: int = 9,
-):
+def write_midi_type0(out_path: Path,
+                     bpm: int,
+                     ppq: int,
+                     drum_channel_1based: int,
+                     events: List[Event]) -> None:
     if mido is None:
-        raise RuntimeError("mido is not installed. Install it: pip install mido")
+        raise RuntimeError("mido is required. Install: pip install mido")
 
-    mid = mido.MidiFile(type=0, ticks_per_beat=ppq)
+    drum_ch = max(1, min(16, drum_channel_1based)) - 1
+    mid = mido.MidiFile(type=0, ticks_per_beat=int(ppq))
     track = mido.MidiTrack()
     mid.tracks.append(track)
 
-    # tempo meta
-    tempo = mido.bpm2tempo(bpm)
-    track.append(mido.MetaMessage("set_tempo", tempo=tempo, time=0))
+    track.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(int(bpm)), time=0))
 
     last_tick = 0
-    for abs_t, kind, note, vel in events:
-        dt = abs_t - last_tick
-        last_tick = abs_t
-        if kind == "on":
-            track.append(mido.Message("note_on", channel=drum_channel, note=note, velocity=vel, time=dt))
-        else:
-            track.append(mido.Message("note_off", channel=drum_channel, note=note, velocity=0, time=dt))
+    for abs_t, kind, a, b in events:
+        dt = int(abs_t - last_tick)
+        if dt < 0:
+            dt = 0
+        last_tick = int(abs_t)
 
-    # end of track
+        if kind == "meta_ts":
+            track.append(mido.MetaMessage(
+                "time_signature",
+                numerator=int(a),
+                denominator=int(b),
+                clocks_per_click=24,
+                notated_32nd_notes_per_beat=8,
+                time=dt
+            ))
+        elif kind == "on":
+            track.append(mido.Message("note_on", channel=drum_ch, note=int(a), velocity=int(b), time=dt))
+        elif kind == "off":
+            track.append(mido.Message("note_off", channel=drum_ch, note=int(a), velocity=0, time=dt))
+
     track.append(mido.MetaMessage("end_of_track", time=0))
     mid.save(str(out_path))
 
 
-def write_ads_simple(
-    out_path: Path,
-    bpm: int,
-    ppq: int,
-    events: List[Tuple[int, str, int, int]],
-    drum_channel: int = 9,
-):
-    """
-    Write a simple binary event stream. This is intentionally minimal and self-describing.
-
-    Format (little-endian):
-      0: 4 bytes  magic "ADS0"
-      4: u16      version = 0x0001
-      6: u16      bpm
-      8: u16      ppq
-      10:u8       channel (0..15)
-      11:u8       reserved
-      12:u32      event_count
-      16: events...
-          each event:
-            u32 delta_ticks
-            u8  kind (1=on, 0=off)
-            u8  note
-            u8  velocity (0 for off)
-            u8  reserved
-    """
-    # Convert abs -> delta
-    deltas: List[Tuple[int, int, int, int]] = []
-    last = 0
-    for abs_t, kind, note, vel in events:
-        delta = abs_t - last
-        last = abs_t
-        k = 1 if kind == "on" else 0
-        deltas.append((delta, k, note, vel))
-
-    with open(out_path, "wb") as f:
-        f.write(b"ADS0")
-        f.write(struct.pack("<H", 0x0001))
-        f.write(struct.pack("<H", int(bpm) & 0xFFFF))
-        f.write(struct.pack("<H", int(ppq) & 0xFFFF))
-        f.write(struct.pack("<B", int(drum_channel) & 0x0F))
-        f.write(struct.pack("<B", 0))
-        f.write(struct.pack("<I", len(deltas)))
-
-        for delta, k, note, vel in deltas:
-            f.write(struct.pack("<I", int(delta) & 0xFFFFFFFF))
-            f.write(struct.pack("<B", k & 0xFF))
-            f.write(struct.pack("<B", int(note) & 0xFF))
-            f.write(struct.pack("<B", int(vel) & 0xFF))
-            f.write(struct.pack("<B", 0))
+def write_ads_simple(out_path: Path,
+                     bpm: int,
+                     ppq: int,
+                     drum_channel_1based: int,
+                     events: List[Event]) -> None:
+    drum_ch = max(1, min(16, drum_channel_1based)) - 1
+    note_events = [(t, k, a, b) for (t, k, a, b) in events if k in ("on", "off")]
+    with out_path.open("wb") as f:
+        f.write(struct.pack("<4sHHBI", b"ADS0", int(bpm), int(ppq), int(drum_ch) & 0xFF, len(note_events)))
+        for abs_t, kind, note, vel in note_events:
+            k = 1 if kind == "on" else 0
+            f.write(struct.pack("<IBBBB", int(abs_t), k, int(note) & 0xFF, int(vel) & 0xFF, 0))
 
 
-# ----------------------------
-# CLI
-# ----------------------------
-
-def parse_velocity_map(s: str) -> List[int]:
-    parts = [p.strip() for p in s.split(",") if p.strip()]
-    if len(parts) != 4:
-        raise argparse.ArgumentTypeError("velocity map must have 4 comma-separated integers, e.g. 0,40,80,110")
-    vals = []
-    for p in parts:
-        try:
-            v = int(p)
-        except Exception:
-            raise argparse.ArgumentTypeError(f"invalid integer in velocity map: {p!r}")
-        if v < 0 or v > 127:
-            raise argparse.ArgumentTypeError("velocity values must be 0..127")
-        vals.append(v)
-    return vals
-
-
-def main():
-    ap = argparse.ArgumentParser(
-        prog="adc-arrtool.py",
-        description="Convert APS ARR to MIDI Type 0 and/or ADS (simple stream). MAIN chain is required.",
-    )
-    ap.add_argument("arr", help="Input .ARR file path")
+def main() -> None:
+    ap = argparse.ArgumentParser(prog="adc-arrtool.py", add_help=True)
+    ap.add_argument("arr", help="Input ARR file")
     ap.add_argument("--format", choices=["midi", "ads", "both"], default="midi",
                     help="Output format (default: midi)")
     ap.add_argument("--out", default=None,
-                    help="Output file path or output directory (default: beside ARR)")
+                    help="Output file path (with suffix) or output directory. Default: beside ARR.")
     ap.add_argument("--patterns-dir", default=None,
-                    help="ADT patterns directory (default: ./patterns, fallback: <ARR dir>/patterns)")
-    ap.add_argument("--bpm", type=int, default=None,
-                    help="Override BPM (default: use BPM from ARR)")
-    ap.add_argument("--ppq", type=int, default=480,
-                    help="MIDI ticks per beat (default: 480)")
-    ap.add_argument("--velocity-map", type=parse_velocity_map, default=[0, 40, 80, 110],
-                    help="ADT level(0..3)->MIDI velocity, e.g. 0,40,80,110")
-    ap.add_argument("--drum-ch", type=int, default=10,
-                    help="MIDI drum channel 1..16 (default: 10)")
-    ap.add_argument("--gate", type=float, default=0.5,
-                    help="Note gate ratio within a step (default: 0.5)")
-    ap.add_argument("--with-countin", dest="with_countin", action="store_true",
-                    help="Include ARR #COUNTIN pattern at the beginning (default)")
-    ap.add_argument("--no-countin", dest="with_countin", action="store_false",
-                    help="Do not include ARR #COUNTIN pattern")
-    ap.set_defaults(with_countin=True)
-    ap.add_argument("--countin", default=None,
-                    help="Override count-in pattern (name or .ADT filename). Overrides ARR #COUNTIN")
-    ap.add_argument("--strict", action="store_true",
-                    help="Fail if any referenced pattern file is missing")
+                    help="Directory containing ADT files referenced by ARR. Default: ARR directory.")
+    ap.add_argument("--ppq", type=int, default=480, help="PPQ (ticks per quarter), default 480")
+    ap.add_argument("--channel", type=int, default=10, help="Drum channel 1..16 (default 10)")
+    ap.add_argument("--gate", type=float, default=0.5, help="Gate ratio relative to step length (default 0.5)")
+    ap.add_argument("--velmap", default=None, help='Velocity map "0,40,80,110" for levels 0..3')
+
+    # BPM override (restored)
+    ap.add_argument("--bpm", type=int, default=None, help="Override BPM (default: use BPM from ARR)")
+
+    # Count-in control:
+    # - ARR: #COUNTIN ... enables count-in (default length: 1 bar = TS numerator beats)
+    # - CLI: --countin N overrides (beats; 0 disables)
+    # - legacy: --with-countin enables 1 bar unless --countin provided
+    ap.add_argument("--countin", type=int, default=None,
+                    help="Override count-in length in BEATS (TS denominator unit). 0 disables.")
+    ap.add_argument("--with-countin", action="store_true",
+                    help="Legacy: enable 1-bar count-in (TS numerator beats). Ignored if --countin is set.")
+
+    ap.add_argument("--verbose", action="store_true", help="Print per-pattern MetaTime math")
+    ap.add_argument("--quiet", action="store_true", help="Suppress MetaTime logs")
+    ap.add_argument("--strict", action="store_true", help="Fail if any pattern is missing/unparseable")
+
     args = ap.parse_args()
 
     arr_path = Path(args.arr)
     if not arr_path.is_file():
-        raise SystemExit(f"[ERROR] ARR not found: {arr_path}")
+        raise SystemExit(f"ARR not found: {arr_path}")
+
+    patterns_dir = Path(args.patterns_dir) if args.patterns_dir else arr_path.parent
+    if not patterns_dir.is_dir():
+        raise SystemExit(f"patterns-dir not found: {patterns_dir}")
 
     arr = parse_arr(arr_path)
+
     bpm = int(args.bpm) if args.bpm is not None else int(arr.bpm)
+    ppq = int(args.ppq)
+    drum_ch_1based = int(args.channel)
+    velmap = parse_velmap(args.velmap)
 
-    patterns_dir = resolve_patterns_dir(arr_path, args.patterns_dir)
-
-    # Expand MAIN indices -> pattern filenames
-    expanded_files: List[Path] = []
+    # Resolve pattern paths from MAIN
+    pattern_paths: List[Path] = []
     missing: List[str] = []
-
-    # Optional count-in (generated): 1 bar, closed hi-hat once per beat.
-    # In this workflow the count-in does not require an ADT file.
-    countin_events: List[Tuple[int, str, int, int]] = []
-    countin_ticks = 0
-    if args.with_countin and (arr.countin_name or args.countin is not None):
-        countin_vel = int(args.velocity_map[2]) if args.velocity_map else 80
-        countin_events, countin_ticks = build_countin_events(
-            ppq=int(args.ppq),
-            hihat_note=42,
-            velocity=countin_vel,
-            gate_ratio=float(args.gate),
-        )
     for idx in arr.main:
         if idx not in arr.mapping:
-            missing.append(f"(missing mapping) {idx}")
+            missing.append(f"(mapping missing) {idx}")
             continue
-        fname = arr.mapping[idx]
-        p = patterns_dir / fname
+        p = patterns_dir / arr.mapping[idx]
         if not p.is_file():
             missing.append(str(p))
-        expanded_files.append(p)
+        pattern_paths.append(p)
 
     if missing:
         msg = "[WARN] Missing patterns:\n  " + "\n  ".join(missing)
         if args.strict:
             raise SystemExit(msg)
-        else:
+        if not args.quiet:
             print(msg)
 
-    # Load patterns
     patterns: List[AdtPattern] = []
-    for p in expanded_files:
+    for p in pattern_paths:
         if not p.is_file():
-            # lenient: skip
             continue
         try:
             patterns.append(parse_adt(p))
         except Exception as e:
             if args.strict:
                 raise
-            print(f"[WARN] Failed to parse ADT {p.name}: {e}")
+            if not args.quiet:
+                print(f"[WARN] Failed to parse {p.name}: {e}")
 
     if not patterns:
-        raise SystemExit("[ERROR] No patterns loaded. Check --patterns-dir and ARR mapping.")
+        raise SystemExit("No patterns could be loaded from MAIN chain.")
 
-    drum_channel = int(args.drum_ch) - 1
-    if drum_channel < 0 or drum_channel > 15:
-        raise SystemExit("[ERROR] --drum-ch must be 1..16")
+    if not args.quiet:
+        print(f"[{METATIME_NAME}] ARR: {arr_path.name} | BPM={bpm} | PPQ={ppq} | DrumCH={drum_ch_1based}")
+        print(f"[{METATIME_NAME}] Chain entries: {len(arr.main)} | Patterns loaded: {len(patterns)} | "
+              f"Total PLAY_BARS: {sum(p.play_bars for p in patterns)}")
+
+    # Decide count-in beats:
+    # Priority: --countin > (legacy --with-countin) > ARR #COUNTIN > default 0
+    if args.countin is not None:
+        countin_beats = max(0, int(args.countin))
+        countin_source = "CLI(--countin)"
+    elif args.with_countin:
+        countin_beats = int(patterns[0].time_sig_n)
+        countin_source = "legacy(--with-countin)"
+    else:
+        if int(arr.countin_beats) < 0:
+            countin_beats = int(patterns[0].time_sig_n)  # default 1 bar
+        else:
+            countin_beats = max(0, int(arr.countin_beats))
+        countin_source = "ARR(#COUNTIN)"
+
+    if not args.quiet:
+        print(f"[{METATIME_NAME}] Count-in source: {countin_source} | beats={countin_beats}")
+
+    countin_events: List[Event] = []
+    countin_ticks = 0
+
+    if countin_beats > 0:
+        n0, d0 = patterns[0].time_sig_n, patterns[0].time_sig_d
+        countin_events, countin_ticks = build_countin_events(
+            ppq=ppq,
+            time_sig_n=n0,
+            time_sig_d=d0,
+            countin_beats=countin_beats,
+            start_tick_offset=1,
+            hihat_note=42,
+            velocity=int(velmap[2]),
+            gate_ratio=float(args.gate),
+        )
+        if not args.quiet:
+            print(f"[{METATIME_NAME}] Count-in: ON | TS={n0}/{d0} | beats={countin_beats} | start_tick=1 | length_ticks={countin_ticks}")
+    else:
+        if not args.quiet:
+            print(f"[{METATIME_NAME}] Count-in: OFF")
 
     events = build_timeline_events(
         patterns=patterns,
-        velocity_map=args.velocity_map,
-        ppq=int(args.ppq),
-        
+        ppq=ppq,
+        velmap=velmap,
         gate_ratio=float(args.gate),
+        verbose=bool(args.verbose),
     )
-    # Prepend generated count-in (if enabled)
-    if countin_ticks > 0 and countin_events:
-        shifted = [(t + countin_ticks, kind, note, vel) for (t, kind, note, vel) in events]
+
+    # Shift main timeline after count-in
+    if countin_events and countin_ticks > 0:
+        shifted = [(t + countin_ticks, k, a, b) for (t, k, a, b) in events]
         events = countin_events + shifted
+        order = {"meta_ts": 0, "on": 1, "off": 2}
+        events.sort(key=lambda e: (e[0], order.get(e[1], 9)))
 
-
-    # Output path handling
-    stem = arr_path.stem
-    out_arg = Path(args.out) if args.out else None
+    total_events = len(events)
+    note_events = sum(1 for (_, k, _, _) in events if k in ("on", "off"))
+    meta_events = total_events - note_events
+    end_tick = max((t for (t, _, _, _) in events), default=0)
+    if not args.quiet:
+        print(f"[{METATIME_NAME}] Events: total={total_events} | note={note_events} | meta={meta_events} | end_tick={end_tick}")
 
     def out_file(ext: str) -> Path:
-        if out_arg is None:
+        if args.out is None:
             return arr_path.with_suffix(ext)
+        out_arg = Path(args.out)
         if out_arg.suffix:
-            # user gave a file path
             return out_arg
-        # user gave a directory
         out_arg.mkdir(parents=True, exist_ok=True)
-        return out_arg / (stem + ext)
+        return out_arg / (arr_path.stem + ext)
 
     if args.format in ("midi", "both"):
         midi_path = out_file(".mid")
-        write_midi_type0(midi_path, bpm=bpm, events=events, ppq=int(args.ppq), drum_channel=drum_channel)
-        print(f"[OK] Wrote MIDI: {midi_path}")
+        write_midi_type0(
+            out_path=midi_path,
+            bpm=bpm,
+            ppq=ppq,
+            drum_channel_1based=drum_ch_1based,
+            events=events,
+        )
+        if not args.quiet:
+            print(f"[OK] Wrote MIDI: {midi_path}")
 
     if args.format in ("ads", "both"):
         ads_path = out_file(".ads")
-        write_ads_simple(ads_path, bpm=bpm, ppq=int(args.ppq), events=events, drum_channel=drum_channel)
-        print(f"[OK] Wrote ADS:  {ads_path}")
+        write_ads_simple(
+            out_path=ads_path,
+            bpm=bpm,
+            ppq=ppq,
+            drum_channel_1based=drum_ch_1based,
+            events=events,
+        )
+        if not args.quiet:
+            print(f"[OK] Wrote ADS:  {ads_path}")
 
 
 if __name__ == "__main__":
