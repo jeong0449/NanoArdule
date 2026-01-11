@@ -2175,6 +2175,13 @@ def main_curses(stdscr):
                     msg = "Selection cleared"
                 continue
 
+            # F/f: clear clipboard (chain editor only)
+            if ch in (ord("f"), ord("F")):
+                clipboard = []
+                selection.reset()
+                msg = "Clipboard cleared"
+                continue
+
             # When chain window has focus, Enter does not insert a pattern
             if ch in (10, 13):  # Enter
                 continue
