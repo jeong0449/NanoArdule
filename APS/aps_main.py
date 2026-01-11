@@ -1259,6 +1259,78 @@ bpm=bpm,
                 preview_pattern = load_pattern_by_filename(chain_fname)
                 chain_preview_active = True
         draw_grid(preview_pattern, grid_win, None, use_color, color_pairs)
+        # Draw beat markers under the lowest lane (visual aid only).
+        try:
+            gh, gw = grid_win.getmaxyx()
+            # Place on the FIRST blank row right after the last lane row.
+            # The grid preview typically has two blank lines before the legend; using the upper blank line
+            # keeps markers aligned and avoids colliding with the legend.
+            slots = int(getattr(preview_pattern, "slots", 12) or 12)
+            y_mark = min(max(0, slots + 1), gh - 2)  # first blank line below last lane
+
+            grid_code = str(getattr(preview_pattern, "grid_type", "") or "").upper()
+            # Steps per bar for display purposes
+            if "16T" in grid_code:
+                steps_per_bar = 24
+            elif "8T" in grid_code:
+                steps_per_bar = 12
+            else:
+                steps_per_bar = 16
+
+            # Total steps and bars (fallback to 2 bars if unknown)
+            total_steps = int(getattr(preview_pattern, "length", 0) or 0)
+            if total_steps <= 0:
+                total_steps = steps_per_bar * 2
+            bars = max(1, int(round(total_steps / float(steps_per_bar))))
+
+            beat_interval = max(1, steps_per_bar // 4)
+
+            # Build a full-width marker line so borders remain intact.
+            # Grid rows look like: "| " + lane(2) + " " + cells...
+            # So the first cell column starts at col=5.
+            # We draw the whole row as spaces, restore box borders with ACS_VLINE,
+            # then draw colored beat markers so they match the dot color scheme
+            # (even beats: 'n' (white), odd beats: 'n2' (cyan)).
+            prefix_len = 4  # final alignment: markers start under the first cell column (col=5)
+            sep_len = 1     # single space between bars
+
+            # 1) Clear the whole line first (prevents "broken border" artifacts)
+            try:
+                grid_win.addnstr(y_mark, 0, " " * gw, gw)
+            except curses.error:
+                pass
+
+            # 2) Restore box borders
+            try:
+                grid_win.addch(y_mark, 0, curses.ACS_VLINE)
+                grid_win.addch(y_mark, gw - 1, curses.ACS_VLINE)
+            except curses.error:
+                pass
+
+            # 3) Draw colored beat markers inside the borders
+            for b in range(bars):
+                bar_x0 = 1 + prefix_len + b * (steps_per_bar + sep_len)
+                for i in range(0, steps_per_bar, beat_interval):
+                    beat_idx = i // beat_interval  # 0..3 for 4/4 preview
+                    if use_color and isinstance(color_pairs, dict):
+                        pair_key = "n2" if (beat_idx % 2) == 1 else "n"
+                        attr = curses.color_pair(color_pairs.get(pair_key, 0))
+                    else:
+                        attr = 0
+                    x = bar_x0 + i
+                    if 0 < x < gw - 1:
+                        try:
+                            grid_win.addch(y_mark, x, ord("|"), attr)
+                        except curses.error:
+                            pass
+
+            grid_win.noutrefresh()
+            grid_win.noutrefresh()  # ensure marker row is flushed
+        except curses.error:
+            pass
+        except Exception:
+            pass
+
         # Add a small marker when the preview is driven by the chain cursor.
         if chain_preview_active:
             try:
