@@ -736,10 +736,15 @@ def choose_block_or_section_curses(
 
     max_y, max_x = stdscr.getmaxyx()
     h = min(len(items) + 4, max_y - 2)
-    w = min(
-        max(len(lbl) for (lbl, _) in items) + 4,
-        max_x - 2,
+    # Width must accommodate not only the longest item label but also the title/help lines.
+    title_line = " Paste: choose block "
+    help_line = "Enter: select  Esc/q: cancel"
+    w_content = max(
+        max(len(lbl) for (lbl, _) in items),
+        len(title_line),
+        len(help_line),
     )
+    w = min(w_content + 4, max_x - 2)
     y = (max_y - h) // 2
     x = (max_x - w) // 2
 
