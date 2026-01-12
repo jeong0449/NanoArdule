@@ -403,7 +403,8 @@ def main() -> None:
     ap.add_argument("--format", choices=["midi", "ads", "both"], default="midi",
                     help="Output format (default: midi)")
     ap.add_argument("--out", default=None,
-                    help="Output file path (with suffix) or output directory. Default: beside ARR.")
+                    help="Output file path (with suffix) or output directory. Default: beside ARR.\n"
+                         "If --format both and --out is a file path, the suffix is replaced for .mid/.ads outputs.")
     ap.add_argument("--patterns-dir", default=None,
                     help="Directory containing ADT files referenced by ARR. Default: ARR directory.")
     ap.add_argument("--ppq", type=int, default=480, help="PPQ (ticks per quarter), default 480")
@@ -545,16 +546,33 @@ def main() -> None:
         print(f"[{METATIME_NAME}] Events: total={total_events} | note={note_events} | meta={meta_events} | end_tick={end_tick}")
 
     def out_file(ext: str) -> Path:
+        """Resolve output path for a given extension.
+
+        Rules:
+        - If --out is omitted: write beside ARR using ARR stem.
+        - If --out is a directory path (no suffix): create it and write inside it.
+        - If --out is a file path (has suffix):
+            * for single-format output: use it as-is
+            * for --format both: treat it as a *base name* and replace suffix per ext
+              (prevents accidental overwrite of .mid by .ads or vice versa).
+        """
         if args.out is None:
             return arr_path.with_suffix(ext)
+
         out_arg = Path(args.out)
+
+        # --out points to a file path
         if out_arg.suffix:
+            if args.format == "both":
+                return out_arg.with_suffix(ext)
             return out_arg
+
+        # --out points to a directory
         out_arg.mkdir(parents=True, exist_ok=True)
         return out_arg / (arr_path.stem + ext)
 
     if args.format in ("midi", "both"):
-        midi_path = out_file(".mid")
+        midi_path = out_file(".MID")
         write_midi_type0(
             out_path=midi_path,
             bpm=bpm,
@@ -566,7 +584,7 @@ def main() -> None:
             print(f"[OK] Wrote MIDI: {midi_path}")
 
     if args.format in ("ads", "both"):
-        ads_path = out_file(".ads")
+        ads_path = out_file(".ADS")
         write_ads_simple(
             out_path=ads_path,
             bpm=bpm,
