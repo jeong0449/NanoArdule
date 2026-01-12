@@ -78,6 +78,16 @@ Core features include:
 | **ADS** | Performance stream | Compiled chain + metadata |
 | **ARR** | Chain description | Sections, repeats, transitions |
 
+> **Note on terminology**
+>
+> Historically, the “D” in **ADT / ADP / ADS** originated from *drum pattern*
+> usage, as the Ardule project initially focused on percussion workflows.
+>
+> In the current specification and documentation, **“D” is defined as
+> “Data”** to reflect the instrument-agnostic nature of the formats and the
+> MetaTime principle, where all musical intent is fully resolved before
+> playback.
+
 ---
 
 ## 5. ADC Toolchain (adc- prefix) — MIDI → ADT Converters  
