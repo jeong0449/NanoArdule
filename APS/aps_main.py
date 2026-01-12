@@ -994,7 +994,7 @@ bpm=bpm,
 
         # 9) If nothing changed and nothing was saved, exit as-is
         if (not modified) and (not saved):
-            msg = "StepSeq: 변경 없음"
+            msg = "StepSeq: no changes"
             return
         # 10) Clear only drum slots in pat.grid to zeros
         for step in range(max_step):
