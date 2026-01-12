@@ -390,7 +390,7 @@ def main_curses(stdscr):
         if len(undo_stack) > 100:
             undo_stack.pop(0)
 
-    
+
     def load_pattern_by_filename(fname: str) -> Optional[Pattern]:
         """Load a pattern file by filename with a small in-memory cache."""
         nonlocal msg
@@ -547,13 +547,13 @@ def main_curses(stdscr):
     def save_composite_pattern():
         """현재 composite_pattern을 HYB_P9xx.ADT (ADT v2.2a 텍스트 포맷)로 저장."""
         nonlocal msg, hyb_next_index, composite_pattern, pattern_files, selected_idx
-    
+
         if not composite_mode or composite_pattern is None:
             msg = "합성 패턴이 없습니다."
             return
-    
+
         default_base = f"HYB_P{hyb_next_index:03d}"
-    
+
         base = dialog_input(
             stdscr,
             "하이브리드 패턴 저장:",
@@ -561,15 +561,15 @@ def main_curses(stdscr):
             maxlen=64,
             suffix=".ADT",
         )
-    
+
         if base is None:
             msg = "저장이 취소되었습니다."
             return
-    
+
         base = base.strip() or default_base
         filename = base + ".ADT"
         path = os.path.join(root, filename)
-    
+
         if os.path.exists(path):
             ok = dialog_confirm(
                 stdscr,
@@ -581,25 +581,25 @@ def main_curses(stdscr):
             if not ok:
                 msg = "저장이 취소되었습니다."
                 return
-    
-    
+
+
         try:
             p = composite_pattern
             validate_grid_levels_v22a(p)
             write_adt_file_v22a(path, p)
-    
+
             msg = f"하이브리드 패턴 저장 완료: {filename}"
             hyb_next_index += 1
-    
+
             refresh_pattern_lists(rescan=True)
             try:
                 selected_idx = pattern_files.index(filename)
             except ValueError:
                 pass
-    
+
         except Exception as e:
             msg = f"하이브리드 패턴 저장 실패: {e}"
-    
+
     def load_countin_from_arr(path: str):
         """ARR 파일에서 # Restore countin_idx by reading the COUNTIN header."""
         nonlocal countin_idx
@@ -1403,8 +1403,8 @@ bpm=bpm,
             if handle_terminal_resize(force=True):
                 continue
 
-        
-        
+
+
 
         # --- Helper: adjust scroll so the selected index is visible ---
         def ensure_visible(total_len: int):
@@ -1761,7 +1761,7 @@ bpm=bpm,
             except Exception as e:
                 msg = f"Help open error: {e}"
             continue
-            
+
         # H/h: open the latest keymap markdown (APS_Keymap*.md)
         if ch in (ord("H"), ord("h")):
             try:
@@ -2258,6 +2258,11 @@ bpm=bpm,
 
         # Chain focus: move/repeat/delete/define sections, etc. (includes block editing)
         if focus == "chain":
+            # O/o: insert-before is a PATTERN-LIST operation only; ignore in chain focus.
+            if ch in (ord("O"), ord("o")):
+                show_message(stdscr, "O: use from Pattern/ARR list focus (Tab to switch).")
+                continue
+
             # ESC: clear block selection
             if ch == 27:  # ESC
                 if selection.get_range():
@@ -2363,13 +2368,13 @@ bpm=bpm,
                     )
 
                 push_undo()
-                
+
                 for i, e in enumerate(entries_to_paste):
                     chain.insert(insert_at + i, e)
                 section_mgr.split_for_insert(insert_at, len(entries_to_paste))
                 _sync_chain_section_labels_from_mgr()
                 chain_selected_idx = insert_at
-            
+
                 selection.reset()
                 msg = f"Pasted {len(entries_to_paste)} step(s) from {label}"
                 continue
@@ -2416,7 +2421,7 @@ bpm=bpm,
                     msg = f"Block range: {cur_rng[0]+1}..{cur_rng[1]+1}"
                 elif cur_anchor is None and prev_anchor is not None:
                     msg = "Block selection cleared."
-       
+
             if ch == ord("s"):
                 rng = selection.get_range()
                 if rng:
@@ -2941,7 +2946,7 @@ bpm=bpm,
                         )
 
 
-                    
+
                     try:
                         if out_port is not None:
                             out_port.close()
