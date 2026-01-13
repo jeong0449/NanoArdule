@@ -76,6 +76,15 @@ void stopBeatEngine(bool toIdle) {
 }
 
 void serviceBeatEngine() {
+  // Requirement: In SONG mode, LEDs are always OFF.
+  if (playSource == PLAY_SRC_SONG) {
+    digitalWrite(LED_A0, LOW);
+    digitalWrite(LED_A1, LOW);
+    digitalWrite(LED_A2, LOW);
+    beatLedPin = -1;
+    return;
+  }
+
   uint32_t now = millis();
 
   // 비트 LED 끄기
@@ -219,6 +228,168 @@ void processMetronomeClick() {
   metroNextBeatMs = now + intervalMs;
 }
 
+//////////////////// ADS v0.1 (Ardule Data Stream) ////////////////////
+// MetaTime principle: events are absolute tick values; BPM/PPQ are header authority.
+
+struct AdsEvent {
+  uint32_t tick;   // absolute tick
+  uint8_t  status; // MIDI status (may be type-only 0x90/0x80; channel applied from header)
+  uint8_t  d1;
+  uint8_t  d2;
+};
+
+static uint32_t adsStartUs = 0;     // micros() at playback start
+static uint32_t adsNextAbsUs = 0;   // next event absolute time (us from start)
+static AdsEvent adsNextEv;
+static bool     adsHaveNext = false;
+
+static uint16_t readU16LE(File &f) {
+  int b0 = readFileByte(f); int b1 = readFileByte(f);
+  if (b0 < 0 || b1 < 0) return 0;
+  return (uint16_t)((uint16_t)b0 | ((uint16_t)b1 << 8));
+}
+
+static uint32_t readU32LE(File &f) {
+  uint32_t v = 0;
+  for (uint8_t i=0;i<4;i++) {
+    int b = readFileByte(f);
+    if (b < 0) return 0;
+    v |= ((uint32_t)(uint8_t)b) << (8*i);
+  }
+  return v;
+}
+
+static bool readNextAdsEvent() {
+  if (!playFileOpen) return false;
+  if (adsEventsRead >= adsEventCount) return false;
+
+  uint32_t tick = readU32LE(playFile);
+  int st = readFileByte(playFile);
+  int d1 = readFileByte(playFile);
+  int d2 = readFileByte(playFile);
+  int rsv = readFileByte(playFile); // reserved/padding byte (ADS v0.1 uses 8 bytes/event)
+  if (st < 0 || d1 < 0 || d2 < 0 || rsv < 0) return false;
+
+  adsNextEv.tick   = tick;
+  adsNextEv.status = (uint8_t)st;// Some ADS writers store a compact event type (0..127) instead of a raw MIDI status byte.
+// If the high bit is not set, interpret as a simple type code and build a proper MIDI status.
+if ((adsNextEv.status & 0x80) == 0) {
+  uint8_t t = adsNextEv.status;
+  if (t == 0)      adsNextEv.status = (uint8_t)(0x80 | (adsChannel & 0x0F)); // Note Off
+  else if (t == 1) adsNextEv.status = (uint8_t)(0x90 | (adsChannel & 0x0F)); // Note On
+  else if (t == 2) adsNextEv.status = (uint8_t)(0xB0 | (adsChannel & 0x0F)); // CC
+  else if (t == 3) adsNextEv.status = (uint8_t)(0xC0 | (adsChannel & 0x0F)); // Program Change
+  else             adsNextEv.status = (uint8_t)(0x90 | (adsChannel & 0x0F)); // Fallback to Note On
+}
+
+  adsNextEv.d1     = (uint8_t)d1;
+  adsNextEv.d2     = (uint8_t)d2;
+
+  // Apply channel authority if the status byte doesn't include channel nibble.
+  if (adsNextEv.status == 0x80 || adsNextEv.status == 0x90) {
+    adsNextEv.status = (uint8_t)((adsNextEv.status & 0xF0) | (adsChannel & 0x0F));
+  }
+
+  adsNextAbsUs = adsNextEv.tick * usPerTick;
+  nextEventUs  = adsStartUs + adsNextAbsUs;
+  adsHaveNext  = true;
+  adsEventsRead++;
+  return true;
+}
+
+bool openCurrentAdsSongFile() {
+  playFile = SD.open(currentFilePath);
+  if (!playFile) return false;
+  playFileOpen = true;
+
+  char magic[5] = {0,0,0,0,0};
+  for (uint8_t i=0;i<4;i++) {
+    int b = readFileByte(playFile);
+    if (b < 0) { playFile.close(); playFileOpen=false; return false; }
+    magic[i] = (char)b;
+  }
+  if (strncmp(magic, "ADS0", 4) != 0) {
+    playFile.close(); playFileOpen=false; return false;
+  }
+
+  adsBpm        = readU16LE(playFile);
+  adsPpq        = readU16LE(playFile);
+  int ch        = readFileByte(playFile);
+    // ADS header channel (0-based 0..15 is recommended by MIDI encoding).
+  // Many tools store channel as 0..15 directly. Default to CH10(=9) for drums when missing.
+  if (ch < 0) {
+    adsChannel = 9;
+  } else if (ch <= 15) {
+    // Treat as 0-based MIDI channel.
+    adsChannel = (uint8_t)ch;
+  } else if (ch >= 1 && ch <= 16) {
+    // Backward-compat: if someone stored 1..16, convert to 0..15.
+    adsChannel = (uint8_t)(ch - 1); // 1-based fallback
+  } else {
+    adsChannel = 9;                 // safe fallback
+  } 
+  adsEventCount = readU32LE(playFile);
+
+  if (adsBpm < 20) adsBpm = 20;
+  if (adsPpq < 24) adsPpq = 24;
+
+  midiPPQ      = adsPpq;
+  usPerQuarter = 60000000UL / (uint32_t)adsBpm;
+  if (usPerQuarter == 0) usPerQuarter = 1;
+  usPerTick    = usPerQuarter / (uint32_t)midiPPQ;
+  if (usPerTick == 0) usPerTick = 1;
+
+  previewBpm = adsBpm; // UI only
+  updateBeatTimingFromBpm();
+
+  adsEventsRead = 0;
+  adsHaveNext   = false;
+  endOfTrack    = false;
+
+  adsStartUs = micros();
+
+  if (!readNextAdsEvent()) {
+    endOfTrack = true;
+  }
+  return true;
+}
+
+void serviceAdsPlayback() {
+  if (playState != PLAYSTATE_PLAYING) return;
+  if (playSource != PLAY_SRC_SONG)    return;
+  if (!playFileOpen)                  return;
+  if (endOfTrack)                     return;
+
+  uint32_t nowUs = micros();
+
+  if (!adsHaveNext) {
+    if (!readNextAdsEvent()) {
+      endOfTrack = true;
+      handleEndOfTrackEvent();
+      return;
+    }
+  }
+
+  if ((int32_t)(nowUs - nextEventUs) < 0) return;
+
+  uint8_t status = adsNextEv.status;
+  uint8_t type   = status & 0xF0;
+
+  if (type == 0x80 || type == 0x90 || type == 0xA0 ||
+      type == 0xB0 || type == 0xE0) {
+    sendMidiMessage3(status, adsNextEv.d1, adsNextEv.d2);
+  } else if (type == 0xC0 || type == 0xD0) {
+    sendMidiMessage2(status, adsNextEv.d1);
+  }
+
+  adsHaveNext = false;
+
+  if (adsEventsRead >= adsEventCount) {
+    endOfTrack = true;
+    handleEndOfTrackEvent();
+  }
+}
+
 //////////////////// 패턴 / SONG 재생 ////////////////////
 
 void startSinglePatternPlayback() {
@@ -314,7 +485,11 @@ void advanceAutoPatternPreview() {
 void startSongPlayback() {
   if (!sdOK) return;
   if (!buildCurrentSongFilePath(currentFilePath, sizeof(currentFilePath))) return;
-  if (!openCurrentMidiSongFile()) return;
+  if (currentSongIsADS) {
+    if (!openCurrentAdsSongFile()) return;
+  } else {
+    if (!openCurrentMidiSongFile()) return;
+  }
 
   playSource = PLAY_SRC_SONG;
   // SONG의 playState 변경은 startBeatEngine()에서 담당
@@ -410,6 +585,7 @@ void servicePatternPlayback() {
 }
 
 void serviceSongPlayback() {
+  if (currentSongIsADS) { serviceAdsPlayback(); return; }
   if (playState != PLAYSTATE_PLAYING) return;
   if (playSource != PLAY_SRC_SONG)    return;
   if (!playFileOpen)                  return;

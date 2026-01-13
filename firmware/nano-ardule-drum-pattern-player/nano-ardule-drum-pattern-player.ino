@@ -18,6 +18,9 @@
 #include "GMDrumNames.h"
 #include <hd44780ioClass/hd44780_I2Cexp.h>
 
+// SONG UI preview: read BPM from selected .MID/.ADS
+bool readSongBpmFromPath(const char *path, bool isAds, uint16_t &bpmOut);
+
 struct LongPressState;
 
 //////////////////// Pins ////////////////////
@@ -304,9 +307,11 @@ int16_t patListCursor  = 0;
 uint8_t currentGenreIndex = 0;
 
 // SONGS 목록
-const uint8_t MAX_SONGS = 24;
+const uint8_t MAX_SONGS = 48;
 struct SongInfo {
   char base[FILEBASE_LEN];
+  char typeChar; // 'm' for .MID, 'a' for .ADS (display hint)
+  bool isAds;
 };
 
 SongInfo drumSongs[MAX_SONGS];
@@ -391,11 +396,45 @@ void saveMetronomeNotesToEeprom() {
 uint8_t drumCount  = 0;
 uint8_t multiCount = 0;
 
+// SONG list overflow indicator (shown in SONG file list screen)
+uint32_t songListFullUntilMs = 0;
+
+// Current song type (set by buildCurrentSongFilePath)
+bool currentSongIsADS = false;
+
+// ADS v0.1 header/state
+uint16_t adsBpm = 120;
+uint16_t adsPpq = 480;
+uint8_t  adsChannel = 9; // default drum ch10 (0-based 9)
+uint32_t adsEventCount = 0;
+uint32_t adsEventsRead  = 0;
+
 int16_t songsRootCursor = 0;
 int16_t songsFileCursor = 0;
 
 // PREVIEW 상태
-int16_t previewBpm = 120;
+int16_t previewBpm = 120;// Update previewBpm from the currently selected SONG file (.MID tempo meta or .ADS header BPM).
+void updateSongPreviewBpm() {
+  // Clear previous value to avoid showing stale BPM when file open/sniff fails.
+  previewBpm = 0;
+
+  char path[64];
+  if (!buildCurrentSongFilePath(path, sizeof(path))) return;
+
+  SongInfo *arr   = (songsRootCursor == 0) ? drumSongs : multiSongs;
+  uint8_t   count = (songsRootCursor == 0) ? drumCount  : multiCount;
+  if (count == 0) return;
+  if (songsFileCursor < 0) songsFileCursor = 0;
+  if (songsFileCursor >= (int16_t)count) songsFileCursor = count - 1;
+
+  uint16_t bpm = 0;
+  if (readSongBpmFromPath(path, arr[songsFileCursor].isAds, bpm)) {
+    if (bpm < 20) bpm = 20;
+    if (bpm > 300) bpm = 300;
+    previewBpm = (int16_t)bpm;
+  }
+}
+
 
 // PREVIEW ALL 모드
 bool     previewAllMode = false;
@@ -908,6 +947,7 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
         uiMode = UIMODE_SONGS_FILELIST;
         songsFileCursor = 0;
         showSongsFileListScreen();
+        updateSongPreviewBpm();
       }
       if(stopClick) {
         indicateButtonFeedback();
@@ -933,6 +973,7 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
         indicateButtonFeedback();
         uiMode = UIMODE_SONG_PLAY;
         playState = PLAYSTATE_IDLE;
+        updateSongPreviewBpm();
         showSongPlayScreen();
       }
 

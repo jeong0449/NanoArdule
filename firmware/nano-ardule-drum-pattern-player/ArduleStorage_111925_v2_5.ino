@@ -223,14 +223,22 @@ void loadSongsFromFolder(const char *path, SongInfo *arr, uint8_t &count) {
     }
     const char *name = entry.name();
     const char *dot = strrchr(name, '.');
-    if(dot && (strcasecmp(dot, ".MID") == 0)) {
-      if(count < MAX_SONGS) {
-        char tmp[FILEBASE_LEN];
-        strncpy(tmp, name, FILEBASE_LEN-1);
-        tmp[FILEBASE_LEN-1] = '\0';
-        stripFileExtension(tmp);
-        copyTrimmed(arr[count].base, FILEBASE_LEN, tmp);
-        count++;
+    if(dot) {
+      bool isMid = (strcasecmp(dot, ".MID") == 0);
+      bool isAds = (strcasecmp(dot, ".ADS") == 0);
+      if(isMid || isAds) {
+        if(count < MAX_SONGS) {
+          char tmp[FILEBASE_LEN];
+          strncpy(tmp, name, FILEBASE_LEN-1);
+          tmp[FILEBASE_LEN-1] = '\0';
+          stripFileExtension(tmp);
+          copyTrimmed(arr[count].base, FILEBASE_LEN, tmp);
+          arr[count].isAds    = isAds;
+          arr[count].typeChar = isAds ? 'a' : 'm';
+          count++;
+        } else {
+          songListFullUntilMs = millis() + 2000;
+        }
       }
     }
     entry.close();
@@ -266,7 +274,9 @@ bool buildCurrentSongFilePath(char *outPath, size_t outSize) {
   if (songsFileCursor >= (int16_t)count) songsFileCursor = count - 1;
 
   const char *subdir = (songsRootCursor == 0) ? "/SONGS/DRUM/" : "/SONGS/MULTI/";
-  snprintf(outPath, outSize, "%s%s.MID", subdir, arr[songsFileCursor].base);
+  snprintf(outPath, outSize, "%s%s.%s", subdir, arr[songsFileCursor].base,
+           arr[songsFileCursor].isAds ? "ADS" : "MID");
+  currentSongIsADS = arr[songsFileCursor].isAds;
   return true;
 }
 
@@ -287,6 +297,99 @@ uint32_t readVariableLength(File &f) {
   }
   return value;
 }
+// ---- MIDI/ADS tempo sniff helpers (for SONG UI preview) ----
+static uint16_t readU16BE(File &f) {
+  int b1 = readFileByte(f);
+  int b2 = readFileByte(f);
+  if (b1 < 0 || b2 < 0) return 0;
+  return (uint16_t)(((uint16_t)b1 << 8) | (uint16_t)b2);
+}
+
+static uint32_t readU32BE(File &f) {
+  int b1 = readFileByte(f);
+  int b2 = readFileByte(f);
+  int b3 = readFileByte(f);
+  int b4 = readFileByte(f);
+  if (b1 < 0 || b2 < 0 || b3 < 0 || b4 < 0) return 0;
+  return ((uint32_t)b1 << 24) | ((uint32_t)b2 << 16) | ((uint32_t)b3 << 8) | (uint32_t)b4;
+}
+
+static bool sniffAdsBpm(File &f, uint16_t &bpmOut) {
+  char magic[4];
+  for (uint8_t i = 0; i < 4; i++) {
+    int c = readFileByte(f);
+    if (c < 0) return false;
+    magic[i] = (char)c;
+  }
+  if (strncmp(magic, "ADS0", 4) != 0) return false;
+
+  // ADS v0.1 header (LE): u16 BPM, u16 PPQ, u8 channel, u32 eventCount
+  int lo = readFileByte(f);
+  int hi = readFileByte(f);
+  if (lo < 0 || hi < 0) return false;
+  bpmOut = (uint16_t)((uint16_t)lo | ((uint16_t)hi << 8));
+  return true;
+}
+
+static bool sniffMidBpm(File &f, uint16_t &bpmOut) {
+  // Minimal tempo sniff: find first FF 51 03 tt tt tt within track data.
+  char tag[4];
+  for (int i = 0; i < 4; i++) { int c = readFileByte(f); if (c < 0) return false; tag[i] = (char)c; }
+  if (strncmp(tag, "MThd", 4) != 0) return false;
+
+  uint32_t hlen = readU32BE(f);
+  (void)readU16BE(f);         // format
+  uint16_t ntrks = readU16BE(f);
+  (void)readU16BE(f);         // division
+
+  if (hlen > 6) {
+    for (uint32_t k = 0; k < (hlen - 6); k++) { if (readFileByte(f) < 0) break; }
+  }
+
+  for (uint16_t t = 0; t < ntrks; t++) {
+    for (int i = 0; i < 4; i++) { int c = readFileByte(f); if (c < 0) return false; tag[i] = (char)c; }
+    if (strncmp(tag, "MTrk", 4) != 0) return false;
+
+    uint32_t tlen = readU32BE(f);
+    uint32_t remain = tlen;
+
+    uint8_t w0 = 0, w1 = 0, w2 = 0;
+    while (remain > 0) {
+      int c = readFileByte(f);
+      if (c < 0) return false;
+      remain--;
+
+      w0 = w1; w1 = w2; w2 = (uint8_t)c;
+
+      if (w0 == 0xFF && w1 == 0x51 && w2 == 0x03) {
+        if (remain < 3) return false;
+        int a = readFileByte(f), b = readFileByte(f), d = readFileByte(f);
+        if (a < 0 || b < 0 || d < 0) return false;
+        remain -= 3;
+        uint32_t usPerQuarter = ((uint32_t)a << 16) | ((uint32_t)b << 8) | (uint32_t)d;
+        if (usPerQuarter == 0) return false;
+        uint32_t bpm = (60000000UL + usPerQuarter/2) / usPerQuarter;
+        bpmOut = (uint16_t)bpm;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool readSongBpmFromPath(const char *path, bool isAds, uint16_t &bpmOut) {
+  if (!sdOK) return false;
+  File f = SD.open(path);
+  if (!f) return false;
+
+  bool ok = false;
+  if (isAds) ok = sniffAdsBpm(f, bpmOut);
+  else       ok = sniffMidBpm(f, bpmOut);
+
+  f.close();
+  return ok;
+}
+
 
 
 bool readAdpHeaderAndPayload(File &f, ADPHeader &hdr, uint16_t &payloadLen) {
@@ -484,4 +587,3 @@ bool openCurrentMidiSongFile() {
   playFileOpen = true;
   return true;
 }
-
