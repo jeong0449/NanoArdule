@@ -28,9 +28,11 @@ For detailed hardware documentation, including schematics and implementation not
 
 ## Firmware Scope
 
-This repository currently focuses on the **Drum Pattern Player firmware**,
-which implements the ADT/ADP-based pattern playback engine and serves as the
-reference implementation of the Ardule pattern system.
+This repository primarily focuses on the **Drum Pattern Player firmware**, 
+which was originally designed around the ADT/ADP-based drum pattern playback engine 
+as the reference implementation of the Ardule pattern system, and has since been 
+extended to support song-level playback through compiled ADS (Ardule Data Stream) 
+execution, as well as direct playback of Standard MIDI Files (Type 0).
 
 Another firmware variant, the **MIDI Controller** (e.g. a **Type-0 MIDI file
 player** with program change, layering, splitting, and more; see the demo
