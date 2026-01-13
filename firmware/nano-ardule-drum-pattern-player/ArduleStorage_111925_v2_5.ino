@@ -16,6 +16,8 @@
 //  - SD, File (from <SD.h>)
 //
 
+void rebuildGenreOrder();
+
 void trimLineEnding(char *s) {
   int i = 0;
   while(s[i]) {
@@ -132,6 +134,8 @@ void loadPatternIndexFile() {
   }
 
   f.close();
+  // Default genre order: N↓ (count desc)
+  rebuildGenreOrder();
 }
 
 

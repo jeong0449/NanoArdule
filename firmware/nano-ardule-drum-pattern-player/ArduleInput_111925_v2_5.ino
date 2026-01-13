@@ -30,6 +30,24 @@ bool readButtonClick(uint8_t pin, bool &latch) {
   return fired;
 }
 
+// Click-on-release helper (press duration must be < maxMs).
+// Useful for buttons that also have long-press actions (prevents firing on long-press).
+bool readButtonReleaseClick(uint8_t pin, bool &latch, uint32_t &downMs, uint32_t nowMs, uint32_t maxMs) {
+  bool pressed = (digitalRead(pin) == LOW);
+  bool fired = false;
+
+  if(pressed && !latch) {
+    latch = true;
+    downMs = nowMs;
+  } else if(!pressed && latch) {
+    // released
+    latch = false;
+    if(nowMs - downMs < maxMs) fired = true;
+  }
+  return fired;
+}
+
+
 void indicateButtonFeedback() {
   digitalWrite(LED_A0, HIGH);
   btnLedOffAt = millis() + BTN_LED_MS;

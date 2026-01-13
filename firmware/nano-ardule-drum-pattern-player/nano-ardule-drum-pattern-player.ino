@@ -74,9 +74,35 @@ byte charPlay[8] = {
   B00000
 };
 
+byte charUp[8] = {
+  B00100,
+  B01110,
+  B11111,
+  B00100,
+  B00100,
+  B00100,
+  B00100,
+  B00000
+};
+
+byte charDown[8] = {
+  B00100,
+  B00100,
+  B00100,
+  B00100,
+  B00100,
+  B11111,
+  B01110,
+  B00100
+};
+
+
 #define CHAR_INF   0
 #define CHAR_PLAY  1
 
+
+#define CHAR_UP    2
+#define CHAR_DOWN  3
 
 //////////////////// State Machine ////////////////////
 enum UiMode : uint8_t {
@@ -220,6 +246,24 @@ GenreInfo genres[MAX_GENRES];
 uint8_t genreCount = 0;
 
 
+
+enum GenreSortMode : uint8_t {
+  SORT_COUNT_DESC = 0,  // N↓
+  SORT_COUNT_ASC  = 1,  // N↑
+  SORT_ALPHA_ASC  = 2,  // A→Z
+  SORT_ALPHA_DESC = 3   // Z→A
+};
+
+// Display indirection: display index -> genres[] index
+uint8_t genreOrder[MAX_GENRES];
+GenreSortMode genreSortMode = SORT_COUNT_DESC;
+
+// A6 short-press uses release-click detection (to avoid firing on long-press)
+uint32_t metroDownMs = 0;
+
+// Forward declarations (implemented in ArduleUI / ArduleStorage)
+void rebuildGenreOrder();
+void cycleGenreSortModeAndKeepSelection();
 // ADP v2.2 header (논리 구조)
 struct ADPHeader {
   char    magic[4];
@@ -421,6 +465,8 @@ void setup() {
   lcd.backlight();
   lcd.createChar(CHAR_INF, charInf);
   lcd.createChar(CHAR_PLAY, charPlay);
+  lcd.createChar(CHAR_UP, charUp);
+  lcd.createChar(CHAR_DOWN, charDown);
 
   lcdPrintLines("Nano Ardule v2.5", "ADP singleBuf  ");
   delay(1000);
@@ -463,15 +509,17 @@ void loop() {
   g_encDelta = 0;
   interrupts();
 
-  bool encClick      = readButtonClick(ENC_BTN_PIN, latchEncBtn);
-  bool playClick     = readButtonClick(BTN_PLAY,    latchPlay);
-  bool stopClick     = readButtonClick(BTN_STOP,    latchStop);
-  bool internalClick = readButtonClick(BTN_INTERNAL,latchInternal);
-  bool bpmUpClick    = readButtonClick(BTN_BPM_UP,  latchBpmUp);
-  bool bpmDnClick    = readButtonClick(BTN_BPM_DN,  latchBpmDn);
-  bool metroClick    = readButtonClick(BTN_METRO,   latchMetro);
-
   uint32_t nowMs = millis();
+
+bool encClick      = readButtonClick(ENC_BTN_PIN, latchEncBtn);
+bool playClick     = readButtonClick(BTN_PLAY,    latchPlay);
+bool stopClick     = readButtonClick(BTN_STOP,    latchStop);
+bool internalClick = readButtonClick(BTN_INTERNAL,latchInternal);
+bool bpmUpClick    = readButtonClick(BTN_BPM_UP,  latchBpmUp);
+bool bpmDnClick    = readButtonClick(BTN_BPM_DN,  latchBpmDn);
+// A6 (BTN_METRO): short click on release (< LONG_PRESS_MS), so it won't fire on long-press
+bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, nowMs, LONG_PRESS_MS);
+
 
   if(btnLedOffAt && nowMs >= btnLedOffAt) {
     digitalWrite(LED_A0, LOW);
@@ -527,6 +575,7 @@ void loop() {
           uiMode = UIMODE_PAT_GEN;
           patGenreCursor = 0;
           currentGenreIndex = 0;
+          rebuildGenreOrder();
           showPatternGenreScreen();
         } else if(mainCursor == MM_SONGS) {
           uiMode = UIMODE_SONGS_ROOT;
@@ -702,9 +751,14 @@ void loop() {
         if(patGenreCursor >= (int16_t)genreCount) patGenreCursor = genreCount-1;
         showPatternGenreScreen();
       }
+      // A6 short click: cycle genre sort order (N↓ -> N↑ -> A→Z -> Z→A)
+      if(metroClick) {
+        indicateButtonFeedback();
+        cycleGenreSortModeAndKeepSelection();
+      }
       if(encClick) {
         indicateButtonFeedback();
-        currentGenreIndex = (uint8_t)patGenreCursor;
+        currentGenreIndex = genreOrder[(uint8_t)patGenreCursor];
         uiMode = UIMODE_PAT_LIST;
         patListCursor = 0;
         showPatternListScreen();
