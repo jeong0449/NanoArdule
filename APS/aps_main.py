@@ -1995,6 +1995,11 @@ bpm=bpm,
                     out_lines.append("")
                 out_lines.append("MAIN|" + ",".join(seq_tokens))
 
+                # Optional BARS line (1:1 with MAIN entries). Default is F.
+                bars_tokens = [str(getattr(e, "bars", "F") or "F").upper()[:1] for e in chain]
+                if any(t in ("A", "B") for t in bars_tokens):
+                    out_lines.append("BARS|" + ",".join(bars_tokens))
+
                 show_text_viewer(out_lines, title="CURRENT ARR (preview)")
                 continue
 
@@ -2096,7 +2101,12 @@ bpm=bpm,
             try:
                 # Save a converted copy reflecting ADP → ADT conversion
 # Save a converted copy reflecting ADP → ADT conversion
-                chain_for_save = [ChainEntry(e.filename, e.repeats) for e in chain]
+                # Preserve per-entry bars selection (F/A/B) when serializing ARR.
+                chain_for_save = []
+                for e in chain:
+                    ne = ChainEntry(e.filename, e.repeats)
+                    setattr(ne, "bars", str(getattr(e, "bars", "F") or "F").upper()[:1])
+                    chain_for_save.append(ne)
                 had_adp = False
                 for e in chain_for_save:
                     if e.filename.lower().endswith(".adp"):
@@ -2673,10 +2683,11 @@ bpm=bpm,
                             msg = "ARR is empty"
                         else:
                             push_undo()
-                            block = [
-                                ChainEntry(e.filename, e.repeats)
-                                for e in arr_chain
-                            ]
+                            block = []
+                            for e in arr_chain:
+                                ne = ChainEntry(e.filename, e.repeats)
+                                ne.bars = str(getattr(e, "bars", "F") or "F").upper()[:1]
+                                block.append(ne)
                             if not chain:
                                 chain = block
                                 chain_selected_idx = 0

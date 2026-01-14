@@ -409,14 +409,28 @@ def chain_entry_play_bars(entry) -> int:
     Return effective playback bars for a ChainEntry.
 
     Rules (best-effort, no file I/O):
-      - If filename indicates a half pattern (e.g. *_H001.ADT or *_h001.ADT), return 1
-      - Otherwise return 2
+      - If filename indicates a half (1-bar) pattern (e.g. *_H001.ADT or *_h001.ADT), return 1
+      - Otherwise, honor per-entry bars selector if present:
+          * entry.bars == 'A' or 'B' => 1 bar (first/second bar only)
+          * entry.bars missing or 'F' => 2 bars
     """
     try:
         fname = getattr(entry, "filename", "")
     except Exception:
         fname = ""
-    return 1 if is_h_pattern_filename(os.path.basename(str(fname))) else 2
+    # Half pattern by filename convention: always 1 bar.
+    if is_h_pattern_filename(os.path.basename(str(fname))):
+        return 1
+
+    # Per-entry bars selector (F/A/B). This is UI/ARR-level info and should affect
+    # chain length metrics and start-bar numbering.
+    try:
+        b = str(getattr(entry, "bars", "F") or "F").strip().upper()[:1]
+    except Exception:
+        b = "F"
+    if b in ("A", "B"):
+        return 1
+    return 2
 
 
 def chain_entry_total_bars(entry) -> int:

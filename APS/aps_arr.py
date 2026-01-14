@@ -47,7 +47,9 @@ def save_arr(path: str, chain: List[ChainEntry], bpm: int) -> None:
     main_line = "MAIN|" + ",".join(seq_parts)
 
     # Optional BARS line (1:1 with MAIN entries). Default is F.
-    bars_tokens = [str(getattr(e, "bars", "F") or "F").upper()[0] for e in chain]
+    # - Tokens: F (full), A (1st bar), B (2nd bar)
+    # - If all entries are F, omit the BARS| line for backwards compatibility.
+    bars_tokens = [str(getattr(e, "bars", "F") or "F").upper()[:1] for e in chain]
     has_non_full = any(t in ("A", "B") for t in bars_tokens)
     bars_line = "BARS|" + ",".join(bars_tokens) if has_non_full else None
 
@@ -168,14 +170,16 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
 
             chain.append(ChainEntry(fn, rep))
 
-        # Apply optional BARS tokens (1:1 with MAIN entries).
-    if bars_spec and chain:
+    # Apply optional BARS tokens (1:1 with MAIN entries).
+    # If BARS| is missing, default everything to F (backwards compatibility).
+    toks: List[str] = []
+    if bars_spec:
         toks = [t.strip().upper()[:1] for t in bars_spec.split(",") if t.strip()]
-        for i, e in enumerate(chain):
-            if i >= len(toks):
-                break
-            t = toks[i]
-            if t in ("F", "A", "B"):
-                setattr(e, "bars", t)
+
+    for i, e in enumerate(chain):
+        t = toks[i] if i < len(toks) else "F"
+        if t not in ("F", "A", "B"):
+            t = "F"
+        setattr(e, "bars", t)
 
     return chain, bpm, sections
