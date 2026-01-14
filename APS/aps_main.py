@@ -1979,9 +1979,9 @@ bpm=bpm,
                         last_sec = None
 
                 out_lines: List[str] = []
-                out_lines.append("#APS ARR v0.05")
                 out_lines.extend(header_lines)
                 out_lines.extend(section_lines)
+                out_lines.append("#APS ARR v0.05")
                 out_lines.append("")
                 out_lines.append(f"BPM={bpm}")
                 out_lines.append("")
@@ -2126,9 +2126,6 @@ bpm=bpm,
                                 continue
                             if line.startswith("#COUNTIN") or line.startswith("#SECTION"):
                                 continue
-                            # Drop existing magic header lines to avoid duplicates / mid-file headers
-                            if line.strip().upper().startswith("#APS ARR"):
-                                continue
                             old_lines.append(line)
 
                     ci_label = get_countin_label()
@@ -2197,10 +2194,7 @@ bpm=bpm,
                             continue
                         play_lines.append(f"{idx}x{rep}" if rep > 1 else f"{idx}")
                     with open(path, "w", encoding="utf-8") as f:
-                        # Magic header MUST be the first line
-                        f.write("#APS ARR v0.05\n")
                         f.write(header + "\n")
-
                         for sec, s2, e2 in section_blocks:
                             f.write(f"#SECTION {sec} {s2+1} {e2+1}\n")
                         if play_lines:
@@ -2404,7 +2398,12 @@ bpm=bpm,
             prev_rng = selection.get_range()
             prev_anchor = getattr(selection, "start", None)
 
-            # Default handling for chain keys (move, single-line delete/repeat, O/o, etc.)
+            # Default handling for chain keys (move, single-line delete/repeat, O/o, etc.)            # --- Status bar feedback prep for L key (toggle bars F/A/B) ---
+            _pre_bars = None
+            if ch in (ord('l'), ord('L')) and chain and 0 <= chain_selected_idx < len(chain):
+                _pre_bars = getattr(chain[chain_selected_idx], 'bars', 'F')
+
+
             chain_selected_idx, changed = handle_chain_keys(
                 ch,
                 chain,
@@ -2415,6 +2414,14 @@ bpm=bpm,
                 selected_idx,
                 push_undo,
             )
+            # --- Status bar message for L key ---
+            if ch in (ord('l'), ord('L')) and changed and chain and 0 <= chain_selected_idx < len(chain):
+                _new_bars = getattr(chain[chain_selected_idx], 'bars', 'F')
+                if _pre_bars is not None and _new_bars != _pre_bars:
+                    msg = f"Bars: {_pre_bars} -> {_new_bars}"
+                else:
+                    msg = f"Bars: {_new_bars}"
+
 
             # If user pressed V, reflect the selection state on the status bar.
             if ch in (ord("v"), ord("V")):
@@ -2473,6 +2480,11 @@ bpm=bpm,
         if focus == "patterns":
             current_list = arr_files if list_mode == "arr" else pattern_files
             total = len(current_list)
+
+            # Ignore 'l'/'L' in pattern list (reserve for chain-only Bars toggle)
+            # Arrow keys still work for column navigation.
+            if ch in (ord('l'), ord('L')):
+                continue
 
             # G: Genre filter popup (PAT list only)
             if ch in (ord("g"), ord("G")) and list_mode == "patterns":

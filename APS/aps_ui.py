@@ -350,6 +350,11 @@ def draw_chain_view(
         sb = start_bars[row] if row < len(start_bars) else 1
         line = f"{row + 1:02d} (b{sb:02d}): {label}{entry.filename} x{entry.repeats}"
 
+        # Bars interpretation tag (F=full, A=1st bar, B=2nd bar)
+        bars = str(getattr(entry, "bars", "F") or "F").upper()
+        if bars != "F":
+            line += f" @{bars}"
+
         if sel_range and sel_range[0] <= row <= sel_range[1]:
             # Block selection: always reversed
             try:

@@ -53,6 +53,7 @@ class Pattern:
 class ChainEntry:
     filename: str
     repeats: int = 1
+    bars: str = "F"  # F=full, A=1st bar, B=2nd bar
     section: Optional[str] = None
 
 

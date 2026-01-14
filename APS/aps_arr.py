@@ -38,13 +38,21 @@ def save_arr(path: str, chain: List[ChainEntry], bpm: int) -> None:
     for entry in chain:
         i = idx_map[entry.filename]
         
-        for _ in range(entry.repeats):
+        if int(getattr(entry, "repeats", 1) or 1) > 1:
+            rep = int(getattr(entry, "repeats", 1) or 1)
+            seq_parts.append(f"{i}x{rep}")
+        else:
             seq_parts.append(str(i))
 
     main_line = "MAIN|" + ",".join(seq_parts)
 
+    # Optional BARS line (1:1 with MAIN entries). Default is F.
+    bars_tokens = [str(getattr(e, "bars", "F") or "F").upper()[0] for e in chain]
+    has_non_full = any(t in ("A", "B") for t in bars_tokens)
+    bars_line = "BARS|" + ",".join(bars_tokens) if has_non_full else None
+
     lines: List[str] = []
-    lines.append("# APS ARR v1")
+    lines.append("#ARR")
     lines.append(f"BPM={bpm}")
     lines.append("")
 
@@ -53,6 +61,8 @@ def save_arr(path: str, chain: List[ChainEntry], bpm: int) -> None:
         lines.append(f"{i}={fn}")
     lines.append("")
     lines.append(main_line)
+    if bars_line:
+        lines.append(bars_line)
     lines.append("")
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -80,6 +90,7 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
     bpm: Optional[int] = None
     pool_map: dict[int, str] = {}
     main_spec: Optional[str] = None
+    bars_spec: Optional[str] = None
     sections: dict[str, tuple[int, int]] = {}
 
     for ln in lines:
@@ -114,6 +125,11 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
         # MAIN chain specification: "MAIN|..."
         if ln.upper().startswith("MAIN|"):
             main_spec = ln.split("|", 1)[1].strip()
+            continue
+
+        # Optional bars selection line: "BARS|F,A,B"
+        if ln.upper().startswith("BARS|"):
+            bars_spec = ln.split("|", 1)[1].strip()
             continue
 
         # Pool entry: "<number>=<filename>"
@@ -152,5 +168,14 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
 
             chain.append(ChainEntry(fn, rep))
 
-    return chain, bpm, sections
+        # Apply optional BARS tokens (1:1 with MAIN entries).
+    if bars_spec and chain:
+        toks = [t.strip().upper()[:1] for t in bars_spec.split(",") if t.strip()]
+        for i, e in enumerate(chain):
+            if i >= len(toks):
+                break
+            t = toks[i]
+            if t in ("F", "A", "B"):
+                setattr(e, "bars", t)
 
+    return chain, bpm, sections

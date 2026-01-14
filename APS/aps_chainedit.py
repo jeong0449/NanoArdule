@@ -361,6 +361,30 @@ def handle_chain_keys(
         _undo_before_edit()
         chain[chain_selected_idx].repeats += 1
         return chain_selected_idx, True
+    # 'L' : toggle pattern length interpretation (F -> A -> B -> F)
+    if ch in (ord("l"), ord("L")):
+        _undo_before_edit()
+        entry = chain[chain_selected_idx]
+        cur = str(getattr(entry, "bars", "F") or "F").upper()
+        nxt = {"F": "A", "A": "B", "B": "F"}.get(cur, "F")
+
+        rep = int(getattr(entry, "repeats", 1) or 1)
+        if rep > 1:
+            # Split run so that ONLY the last repetition gets the new bars flag.
+            entry.repeats = rep - 1
+            new_entry = copy.deepcopy(entry)
+            new_entry.repeats = 1
+            setattr(new_entry, "bars", nxt)
+            insert_at = chain_selected_idx + 1
+            chain.insert(insert_at, new_entry)
+            section_mgr.shift_after_insert(insert_at, 1)
+            chain_selected_idx = insert_at
+        else:
+            setattr(entry, "bars", nxt)
+
+        selection.reset()
+        _set_msg(f"bars: {cur} -> {nxt}")
+        return chain_selected_idx, True
 
     # Delete(KEY_DC) : 현재 줄 xN 감소 / N=1이면 줄 삭제
     if ch == curses.KEY_DC:
@@ -414,6 +438,14 @@ def handle_chain_keys(
         section_mgr.shift_after_insert(insert_at, 1)
         chain_selected_idx = insert_at
         selection.reset()
+        return chain_selected_idx, True
+        
+    if ch in (ord('l'), ord('L')):
+        entry = chain[chain_selected_idx]
+        old = getattr(entry, "bars", "F")
+        new = {"F": "A", "A": "B", "B": "F"}.get(old, "F")
+        entry.bars = new
+        set_status_message(f"bars: {old} -> {new}")
         return chain_selected_idx, True
 
     # o: 첫 번째 섹션을 현재 위치 뒤에 삽입
@@ -474,7 +506,9 @@ def format_chain_line(idx_1based: int, start_bar_1based: int, entry: ChainEntry)
     sec_txt = f"[{sec}] " if sec else ""
     fn = getattr(entry, "filename", "")
     rep = int(getattr(entry, "repeats", 1) or 1)
-    return f"{idx_1based:02d} (b{start_bar_1based:02d}): {sec_txt}{fn} x{rep}"
+    bars = str(getattr(entry, "bars", "F") or "F").upper()
+    tag = "" if bars == "F" else (" @" + bars)
+    return f"{idx_1based:02d} (b{start_bar_1based:02d}): {sec_txt}{fn} x{rep}" + tag
 
 
 def build_chain_display_lines(chain: List[ChainEntry], count_in_bars: int = 0):

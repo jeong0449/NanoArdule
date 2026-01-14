@@ -37,6 +37,12 @@ def play_pattern_on_output(
     # For half-patterns (1 bar), play only the first half of the grid without consuming time for the 2nd bar.
     effective_len = p.length if getattr(p, "play_bars", 2) == 2 else max(1, p.length // 2)
 
+    offset = int(getattr(p, "play_offset", 0) or 0)
+    if offset < 0:
+        offset = 0
+    if offset >= p.length:
+        offset = 0
+
     total_beats = beats * bars if beats else 4
     sec_per_beat = 60.0 / bpm
     step_sec = (total_beats * sec_per_beat) / effective_len
@@ -65,13 +71,16 @@ def play_pattern_on_output(
             if _poll_space_to_stop():
                 raise KeyboardInterrupt
 
-            draw_grid(p, grid_win, step, use_color, color_pairs)
+            grid_index = step + offset
+            if grid_index >= p.length:
+                grid_index = step  # safety fallback
+            draw_grid(p, grid_win, grid_index, use_color, color_pairs)
             stdscr.refresh()
 
             # NOTE ON
             active = []
             for slot in range(p.slots):
-                acc = p.grid[step][slot]
+                acc = p.grid[grid_index][slot]
                 vel = velocity_from_acc(acc)
                 if vel > 0:
                     note = p.slot_note[slot]
@@ -175,6 +184,19 @@ def play_chain(
 
             try:
                 p = load_pattern_func(path)
+
+                # Apply ARR-level bar selection (F/A/B) per chain entry.
+                sel = str(getattr(entry, "bars", "F") or "F").upper()[:1]
+                # Defaults from ADT: p.play_bars is already set by ADT header (PLAY_BARS=1) and filename hint.
+                p.play_offset = 0
+                if sel in ("A", "B"):
+                    # Force 1-bar playback if ADT is 2-bar; do not exceed ADT intrinsic length.
+                    if int(getattr(p, "play_bars", 2) or 2) >= 2:
+                        p.play_bars = 1
+                        if sel == "B":
+                            p.play_offset = max(0, int(p.length // 2))
+                    else:
+                        p.play_bars = 1
             except Exception:
                 continue
 
