@@ -24,6 +24,7 @@ class ArrFile:
     bpm: int
     mapping: Dict[int, str]
     main: List[int]
+    bars: List[str]
     # count-in length in beats (TS denominator unit)
     #  0 : off
     # -1 : enabled but "default length" (1 bar = TS numerator beats)
@@ -97,12 +98,24 @@ def ticks_per_beat_from_ts(ppq: int, den: int) -> int:
     return max(1, int(round(ppq * (4.0 / float(den)))))
 
 
+
 def parse_arr(path: Path) -> ArrFile:
     bpm = 120
     mapping: Dict[int, str] = {}
     main: List[int] = []
+    bars: List[str] = []
     countin_beats = 0
 
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    for raw in lines:
+        s = raw.strip()
+        if not s:
+            continue
+
+        # ARR meta: #COUNTIN ...
+        # Accept:
+        #   #COUNTIN CountIn_HH
+        #   #COUNTIN CountIn_HH 4
     lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     for raw in lines:
         s = raw.strip()
@@ -139,7 +152,14 @@ def parse_arr(path: Path) -> ArrFile:
             for part in rhs.split(","):
                 part = part.strip()
                 if part:
+                    # Note: adc-arrtool expects MAIN| already expanded (no xN syntax here).
                     main.append(int(part))
+            continue
+
+        if u.startswith("BARS|"):
+            rhs = s.split("|", 1)[1].strip()
+            toks = [t.strip().upper()[:1] for t in rhs.split(",") if t.strip()]
+            bars = [t if t in ("F", "A", "B") else "F" for t in toks]
             continue
 
         # mapping: "1=RCK_P001.ADT"
@@ -153,7 +173,16 @@ def parse_arr(path: Path) -> ArrFile:
 
     if not main:
         raise ValueError("ARR has no MAIN| chain.")
-    return ArrFile(bpm=bpm, mapping=mapping, main=main, countin_beats=countin_beats)
+    if not bars:
+        bars = ["F"] * len(main)
+    else:
+        # Pad/truncate for safety (backward/forward compatibility).
+        if len(bars) < len(main):
+            bars = bars + ["F"] * (len(main) - len(bars))
+        elif len(bars) > len(main):
+            bars = bars[: len(main)]
+
+    return ArrFile(bpm=bpm, mapping=mapping, main=main, bars=bars, countin_beats=countin_beats)
 
 
 def parse_adt(path: Path) -> AdtPattern:
@@ -295,18 +324,48 @@ def build_timeline_events(patterns: List[AdtPattern],
                           ppq: int,
                           velmap: List[int],
                           gate_ratio: float,
-                          verbose: bool) -> List[Event]:
+                          verbose: bool,
+                          bars_list: Optional[List[str]] = None) -> List[Event]:
+
     events: List[Event] = []
     cur_tick = 0
     prev_ts: Optional[Tuple[int, int]] = None
 
-    for p in patterns:
+    for i_p, p in enumerate(patterns):
         ts = (p.time_sig_n, p.time_sig_d)
         subdiv = grid_to_subdiv(p.grid)
 
         ticks_per_bar = int(round(ppq * ts[0] * (4.0 / ts[1])))
         steps_per_bar = max(1, ts[0] * subdiv)
-        steps_to_play = max(1, steps_per_bar * p.play_bars)
+        # Decide which bar to render for this chain entry.
+        # - F: full (use p.play_bars)
+        # - A: first bar only (cap to 1 bar)
+        # - B: second bar only (cap to 1 bar; for 2-bar patterns, render bar2 shifted to start at 0)
+        mode = "F"
+        if bars_list is not None and 0 <= i_p < len(bars_list):
+            m = str(bars_list[i_p] or "F").strip().upper()[:1]
+            if m in ("F", "A", "B"):
+                mode = m
+
+        steps_to_play = max(1, steps_per_bar * int(p.play_bars))
+        start_step = 0
+        steps_render = min(steps_to_play, int(p.length))
+
+        # Half patterns (PLAY_BARS=1) are always 1-bar, regardless of A/B.
+        if int(p.play_bars) <= 1:
+            start_step = 0
+            steps_render = min(steps_per_bar, int(p.length))
+            mode = mode  # semantic only
+        else:
+            if mode == "A":
+                start_step = 0
+                steps_render = min(steps_per_bar, int(p.length))
+            elif mode == "B":
+                start_step = min(steps_per_bar, max(0, int(p.length) - 1))
+                steps_render = min(steps_per_bar, max(0, int(p.length) - start_step))
+            else:
+                start_step = 0
+                steps_render = min(steps_to_play, int(p.length))
         step_ticks = max(1, int(round(ticks_per_bar / steps_per_bar)))
         gate_ticks = max(1, int(round(step_ticks * gate_ratio)))
 
@@ -322,10 +381,11 @@ def build_timeline_events(patterns: List[AdtPattern],
                 f"ticks/bar={ticks_per_bar} | step_ticks={step_ticks}"
             )
 
-        steps_render = min(steps_to_play, p.length)
+        # steps_render already computed above (after applying BARS selection)
         for s in range(steps_render):
+            src_s = start_step + s
             base = cur_tick + s * step_ticks
-            levels = p.grid_levels[s]
+            levels = p.grid_levels[src_s]
             limit = min(len(levels), len(p.notes))
             for i in range(limit):
                 lvl = levels[i]
@@ -336,7 +396,13 @@ def build_timeline_events(patterns: List[AdtPattern],
                 events.append((base, "on", note, vel))
                 events.append((base + gate_ticks, "off", note, 0))
 
-        cur_tick += steps_to_play * step_ticks
+        # Advance timeline by the *played* duration (A/B -> 1 bar, F -> full).
+        advance_steps = steps_to_play
+        if int(p.play_bars) <= 1:
+            advance_steps = steps_per_bar
+        elif mode in ("A", "B"):
+            advance_steps = steps_per_bar
+        cur_tick += advance_steps * step_ticks
 
     order = {"meta_ts": 0, "on": 1, "off": 2}
     events.sort(key=lambda e: (e[0], order.get(e[1], 9)))
@@ -482,7 +548,7 @@ def main() -> None:
     if not args.quiet:
         print(f"[{METATIME_NAME}] ARR: {arr_path.name} | BPM={bpm} | PPQ={ppq} | DrumCH={drum_ch_1based}")
         print(f"[{METATIME_NAME}] Chain entries: {len(arr.main)} | Patterns loaded: {len(patterns)} | "
-              f"Total PLAY_BARS: {sum(p.play_bars for p in patterns)}")
+              f"Total PLAY_BARS: {sum((1 if (getattr(arr, 'bars', None) and i < len(arr.bars) and str(arr.bars[i]).upper()[:1] in ('A','B') and int(patterns[i].play_bars) >= 2) else int(patterns[i].play_bars)) for i in range(len(patterns)))}")
 
     # Decide count-in beats:
     # Priority: --countin > (legacy --with-countin) > ARR #COUNTIN > default 0
@@ -529,6 +595,7 @@ def main() -> None:
         velmap=velmap,
         gate_ratio=float(args.gate),
         verbose=bool(args.verbose),
+        bars_list=getattr(arr, 'bars', None),
     )
 
     # Shift main timeline after count-in
