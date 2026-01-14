@@ -1979,9 +1979,9 @@ bpm=bpm,
                         last_sec = None
 
                 out_lines: List[str] = []
+                out_lines.append("#APS ARR v0.05")
                 out_lines.extend(header_lines)
                 out_lines.extend(section_lines)
-                out_lines.append("#APS ARR v0.05")
                 out_lines.append("")
                 out_lines.append(f"BPM={bpm}")
                 out_lines.append("")
@@ -2126,6 +2126,9 @@ bpm=bpm,
                                 continue
                             if line.startswith("#COUNTIN") or line.startswith("#SECTION"):
                                 continue
+                            # Drop existing magic header lines to avoid duplicates / mid-file headers
+                            if line.strip().upper().startswith("#APS ARR"):
+                                continue
                             old_lines.append(line)
 
                     ci_label = get_countin_label()
@@ -2194,7 +2197,10 @@ bpm=bpm,
                             continue
                         play_lines.append(f"{idx}x{rep}" if rep > 1 else f"{idx}")
                     with open(path, "w", encoding="utf-8") as f:
+                        # Magic header MUST be the first line
+                        f.write("#APS ARR v0.05\n")
                         f.write(header + "\n")
+
                         for sec, s2, e2 in section_blocks:
                             f.write(f"#SECTION {sec} {s2+1} {e2+1}\n")
                         if play_lines:
