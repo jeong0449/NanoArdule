@@ -1,6 +1,6 @@
 # Nano Ardule Drum Pattern Player (Firmware) — Structure Map
 
-**Last updated:** 2026-01-12
+**Last updated:** 2026-01-16
 
 >
 > Target board (per sketch header): **Arduino Nano Every (ATmega4809)**.  
@@ -39,9 +39,10 @@ nano-ardule-drum-pattern-player/
 
 ```text
 [Input (buttons/encoder)]
+ (ArduleInput: scan + debounced click/long-press)
           │
           ▼
-[UI state machine] ────────► (select file / change params / start-stop)
+[UI state machine] ────────► (dispatch input by UiMode; select file / change params / start-stop)
           │
           ▼
 [Storage: SD read] ────────► (load ADP -> PatternEvent[], open MIDI song file)
@@ -99,6 +100,9 @@ const uint8_t TOTAL_BEATS   = 8; // 4/4 * 2 bars
 
 This is an important “fixed-time” assumption for the **beat LED / metronome / bar-cycle** logic.
 
+⚠️ **Note**: This assumption is deeply embedded in beat-LED timing and UI cycle logic. If you ever add
+variable-length patterns (e.g., 1-bar or odd meters) to the firmware engine, revisit this section first.
+
 ### 3.4 ADP header (binary) representation
 
 The sketch defines an `ADPHeader` struct with fields such as:
@@ -125,6 +129,7 @@ Globals include:
 - Declares global state, structs, and configuration constants.
 - Implements EEPROM settings load/save helpers.
 - Owns `setup()` and `loop()`.
+- Acts as the orchestration layer that binds UI, Storage, and Engine without owning domain logic.
 
 **Notable functions**
 - `loadSettingsFromEeprom()`
