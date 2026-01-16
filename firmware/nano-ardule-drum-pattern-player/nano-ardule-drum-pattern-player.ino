@@ -493,6 +493,8 @@ const uint16_t BTN_LED_MS = 40;
 // We run the prewarm right after entering the Patterns UI (genre screen),
 // so the first user click inside the Patterns UI stays responsive.
 static bool pendingIndexPrewarm = false;
+static bool patternsFreshEntry = false;// True only right after entering Patterns from Main
+static uint8_t lastGenreForList = 255;// Used to decide whether to restore or reset patListCursor
 
 // SD 상태
 bool sdOK = false;
@@ -638,8 +640,9 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
     internalCursor = 0;
     internalBrowserActive = true;
     uiMode = UIMODE_PAT_LIST;
-    patListCursor = 0;
-    showPatternListScreen();
+        if (patternsFreshEntry) patListCursor = 0;
+        patternsFreshEntry = false;
+        showPatternListScreen();
   }
 
   if(metroLong && uiMode != UIMODE_METRO) {
@@ -686,6 +689,8 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
           patGenreCursor = 0;
           currentGenreIndex = 0;
           rebuildGenreOrder();
+          patternsFreshEntry = true; // entering Patterns UI from top
+          lastGenreForList = 255; // force list cursor reset on first genre selection
           // Prewarm SD access once right after entering the Patterns UI.
           // This shifts the one-time cold SD/INDEX cost away from the first click
           // inside the Patterns UI (e.g., selecting a genre).
@@ -895,13 +900,17 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
       }
       if(encClick) {
         indicateButtonFeedback();
-        currentGenreIndex = genreOrder[(uint8_t)patGenreCursor];
+        uint8_t selGenre = genreOrder[(uint8_t)patGenreCursor];
+        currentGenreIndex = selGenre;
         uiMode = UIMODE_PAT_LIST;
-        patListCursor = 0;
+        if (patternsFreshEntry || selGenre != lastGenreForList) patListCursor = 0;
+        lastGenreForList = selGenre;
+        patternsFreshEntry = false;
         showPatternListScreen();
       }
       if(stopClick) {
         indicateButtonFeedback();
+        patternsFreshEntry = false;
         uiMode = UIMODE_MAIN;
         showMainMenuScreen();
       }
@@ -1076,7 +1085,7 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
           showPatternListScreen();
         } else {
           uiMode = UIMODE_PAT_LIST;
-          patListCursor = 0;
+          // keep patListCursor as-is
           showPatternListScreen();
         }
       }
