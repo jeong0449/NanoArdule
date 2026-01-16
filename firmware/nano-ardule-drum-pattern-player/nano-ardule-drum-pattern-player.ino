@@ -278,6 +278,7 @@ bool     encLongFired = false;
 // Forward declarations (implemented in ArduleUI / ArduleStorage)
 void rebuildGenreOrder();
 void cycleGenreSortModeAndKeepSelection();
+void prewarmPatternIndexOnce();
 // ADP v2.2 header (논리 구조)
 struct ADPHeader {
   char    magic[4];
@@ -475,6 +476,7 @@ const uint16_t LONG_PRESS_MS = 800;
 // 인코더, METRO 버튼 롱프레스 상태
 LongPressState lpEnc;
 LongPressState lpMetro;
+LongPressState lpInternal;
 
 // 디바운스 래치
 bool latchEncBtn=false, latchPlay=false, latchStop=false, latchInternal=false, latchMetro=false;
@@ -486,6 +488,11 @@ volatile int16_t g_encDelta = 0;
 // 버튼 피드백 LED
 uint32_t btnLedOffAt = 0;
 const uint16_t BTN_LED_MS = 40;
+
+// One-time SD/INDEX prewarm trigger.
+// We run the prewarm right after entering the Patterns UI (genre screen),
+// so the first user click inside the Patterns UI stays responsive.
+static bool pendingIndexPrewarm = false;
 
 // SD 상태
 bool sdOK = false;
@@ -530,7 +537,7 @@ void setup() {
   lcd.createChar(CHAR_UP, charUp);
   lcd.createChar(CHAR_DOWN, charDown);
 
-  lcdPrintLines(F("Nano Ardule v2.5"), F("ADP singleBuf  "));
+  lcdPrintLines(F("Nano Ardule v2.5"), F(" Ready to Play! "));
   delay(1000);
 
   if(SD.begin(SD_CS_PIN)) {
@@ -619,7 +626,21 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
     encDownMs = 0;
     encLongFired = false;
   }
-  bool metroLong = checkLongPressState(BTN_METRO,     lpMetro, nowMs);
+  bool metroLong    = checkLongPressState(BTN_METRO,     lpMetro, nowMs);
+  bool internalLong = checkLongPressState(BTN_INTERNAL,  lpInternal, nowMs);
+
+  // D5 long-press: jump to INTERNAL (emergency) pattern browser.
+  // Works from any screen; does not auto-start playback.
+  if(internalLong && !internalBrowserActive) {
+    indicateButtonFeedback();
+    stopAllPlaybackAndReset(true);
+    internalModePlaying = false;
+    internalCursor = 0;
+    internalBrowserActive = true;
+    uiMode = UIMODE_PAT_LIST;
+    patListCursor = 0;
+    showPatternListScreen();
+  }
 
   if(metroLong && uiMode != UIMODE_METRO) {
     indicateButtonFeedback();
@@ -651,6 +672,13 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
         if(mainCursor >= (int16_t)MM_COUNT) mainCursor = MM_COUNT - 1;
         showMainMenuScreen();
       }
+      // D7/D8 (-/+) navigate by 1 in list/selection screens.
+      if(bpmUpClick || bpmDnClick) {
+        mainCursor += (bpmUpClick ? 1 : -1);
+        if(mainCursor < 0) mainCursor = 0;
+        if(mainCursor >= (int16_t)MM_COUNT) mainCursor = MM_COUNT - 1;
+        showMainMenuScreen();
+      }
       if(encClick) {
         indicateButtonFeedback();
         if(mainCursor == MM_PATTERNS) {
@@ -658,6 +686,10 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
           patGenreCursor = 0;
           currentGenreIndex = 0;
           rebuildGenreOrder();
+          // Prewarm SD access once right after entering the Patterns UI.
+          // This shifts the one-time cold SD/INDEX cost away from the first click
+          // inside the Patterns UI (e.g., selecting a genre).
+          pendingIndexPrewarm = true;
           showPatternGenreScreen();
         } else if(mainCursor == MM_SONGS) {
           uiMode = UIMODE_SONGS_ROOT;
@@ -747,6 +779,12 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
           if(settingsCursor > 1) settingsCursor = 1;
           showSettingsMenuScreen();
         }
+        if(bpmUpClick || bpmDnClick) {
+          settingsCursor += (bpmUpClick ? 1 : -1);
+          if(settingsCursor < 0) settingsCursor = 0;
+          if(settingsCursor > 1) settingsCursor = 1;
+          showSettingsMenuScreen();
+        }
         if(encClick) {
           indicateButtonFeedback();
           if(settingsCursor == 0) {
@@ -832,8 +870,20 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
       break;
 
     case UIMODE_PAT_GEN:
+      // One-time SD/INDEX prewarm (SD mode only).
+      // Runs without button feedback to avoid "long LED" perception.
+      if(pendingIndexPrewarm && !internalBrowserActive) {
+        pendingIndexPrewarm = false;
+        prewarmPatternIndexOnce();
+      }
       if(delta != 0) {
         patGenreCursor += (delta > 0 ? 1 : -1);
+        if(patGenreCursor < 0) patGenreCursor = 0;
+        if(patGenreCursor >= (int16_t)genreCount) patGenreCursor = genreCount-1;
+        showPatternGenreScreen();
+      }
+      if(bpmUpClick || bpmDnClick) {
+        patGenreCursor += (bpmUpClick ? 1 : -1);
         if(patGenreCursor < 0) patGenreCursor = 0;
         if(patGenreCursor >= (int16_t)genreCount) patGenreCursor = genreCount-1;
         showPatternGenreScreen();
@@ -860,6 +910,20 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
     case UIMODE_PAT_LIST:
       if(delta != 0) {
         patListCursor += (delta > 0 ? 1 : -1);
+        if (internalBrowserActive) {
+          int16_t cnt = (int16_t)EMERGENCY_PATTERN_COUNT;
+          if (patListCursor < 0) patListCursor = 0;
+          if (cnt > 0 && patListCursor >= cnt) patListCursor = cnt - 1;
+          internalCursor = (uint8_t)patListCursor;
+        } else if(genreCount > 0) {
+          uint8_t cnt = genres[currentGenreIndex].count;
+          if(patListCursor < 0) patListCursor = 0;
+          if(patListCursor >= (int16_t)cnt) patListCursor = cnt-1;
+        }
+        showPatternListScreen();
+      }
+      if(bpmUpClick || bpmDnClick) {
+        patListCursor += (bpmUpClick ? 1 : -1);
         if (internalBrowserActive) {
           int16_t cnt = (int16_t)EMERGENCY_PATTERN_COUNT;
           if (patListCursor < 0) patListCursor = 0;
@@ -1025,6 +1089,12 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
         if(songsRootCursor > 1) songsRootCursor = 1;
         showSongsRootScreen();
       }
+      if(bpmUpClick || bpmDnClick) {
+        songsRootCursor += (bpmUpClick ? 1 : -1);
+        if(songsRootCursor < 0) songsRootCursor = 0;
+        if(songsRootCursor > 1) songsRootCursor = 1;
+        showSongsRootScreen();
+      }
       if(encClick) {
         indicateButtonFeedback();
         uiMode = UIMODE_SONGS_FILELIST;
@@ -1042,6 +1112,17 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
     case UIMODE_SONGS_FILELIST:
       if(delta != 0) {
         songsFileCursor += (delta > 0 ? 1 : -1);
+        {
+          uint8_t count = (songsRootCursor == 0) ? drumCount : multiCount;
+          if(count > 0) {
+            if(songsFileCursor < 0) songsFileCursor = 0;
+            if(songsFileCursor >= (int16_t)count) songsFileCursor = count-1;
+          }
+        }
+        showSongsFileListScreen();
+      }
+      if(bpmUpClick || bpmDnClick) {
+        songsFileCursor += (bpmUpClick ? 1 : -1);
         {
           uint8_t count = (songsRootCursor == 0) ? drumCount : multiCount;
           if(count > 0) {

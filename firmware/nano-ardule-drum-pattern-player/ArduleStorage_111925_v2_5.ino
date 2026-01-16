@@ -139,6 +139,33 @@ void loadPatternIndexFile() {
 }
 
 
+// Pre-warm SD access for INDEX.TXT once per boot.
+// Purpose: avoid a one-time "cold" SD open/read delay being perceived as UI lag
+// on the very first click that enters the SD pattern list.
+//
+// NOTE:
+//  - This does NOT cache/parse the whole file; it only opens and reads a small
+//    chunk, then closes.
+//  - It is intentionally skipped for INTERNAL (emergency) browsing.
+static bool g_indexPrewarmed = false;
+void prewarmPatternIndexOnce() {
+  if (g_indexPrewarmed) return;
+  if (!sdOK) return;
+  if (internalBrowserActive) return;
+
+  File f = SD.open("/PATTERNS/INDEX.TXT");
+  if (!f) {
+    f = SD.open("/SYSTEM/INDEX.TXT");
+  }
+  if (f) {
+    char tmp[96];
+    (void)f.read(tmp, sizeof(tmp));
+    f.close();
+  }
+  g_indexPrewarmed = true;
+}
+
+
 // 지정한 장르(gidx)의 n번째 패턴 파일 베이스 이름을 가져온다.
 // 예: DRM 장르의 0번째 -> "DRM_P001"
 bool getPatternFileBaseByGenreIndex(uint8_t gidx, uint8_t nth,
@@ -206,6 +233,78 @@ bool getPatternFileBaseByGenreIndex(uint8_t gidx, uint8_t nth,
   return false;
 }
 
+// -----------------------------------------------------------------------------
+// Pattern base-name cache for INDEX.TXT lookups
+//
+// Purpose:
+// - Avoid repeated SD.open() + linear scan of INDEX.TXT for the same (gidx,nth)
+//   during UI refresh and PLAY/PAUSE transitions.
+//
+// Notes:
+// - Behavior is unchanged: this is a read-through cache around
+//   getPatternFileBaseByGenreIndex().
+// - Keep cache tiny (2 entries) because UI commonly needs (nth) and (nth+1).
+// -----------------------------------------------------------------------------
+struct PatternBaseCacheEntry {
+  bool valid;
+  uint8_t gidx;
+  uint8_t nth;
+  uint32_t stamp;
+  char base[FILEBASE_LEN];
+};
+
+static PatternBaseCacheEntry s_patBaseCache[2];
+static uint32_t s_patBaseCacheStamp = 1;
+
+void invalidatePatternBaseCache() {
+  s_patBaseCache[0].valid = false;
+  s_patBaseCache[1].valid = false;
+}
+
+static int findPatternBaseCacheHit(uint8_t gidx, uint8_t nth) {
+  for (int i = 0; i < 2; ++i) {
+    if (s_patBaseCache[i].valid &&
+        s_patBaseCache[i].gidx == gidx &&
+        s_patBaseCache[i].nth == nth) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+static int selectPatternBaseCacheVictim() {
+  if (!s_patBaseCache[0].valid) return 0;
+  if (!s_patBaseCache[1].valid) return 1;
+  return (s_patBaseCache[0].stamp <= s_patBaseCache[1].stamp) ? 0 : 1;
+}
+
+bool getPatternFileBaseByGenreIndex_cached(uint8_t gidx, uint8_t nth,
+                                           char *outBase, size_t outSize) {
+  if (!outBase || outSize == 0) return false;
+
+  int hit = findPatternBaseCacheHit(gidx, nth);
+  if (hit >= 0) {
+    s_patBaseCache[hit].stamp = s_patBaseCacheStamp++;
+    copyTrimmed(outBase, outSize, s_patBaseCache[hit].base);
+    return true;
+  }
+
+  char tmp[FILEBASE_LEN];
+  if (!getPatternFileBaseByGenreIndex(gidx, nth, tmp, sizeof(tmp))) {
+    return false;
+  }
+
+  int victim = selectPatternBaseCacheVictim();
+  s_patBaseCache[victim].valid = true;
+  s_patBaseCache[victim].gidx = gidx;
+  s_patBaseCache[victim].nth  = nth;
+  s_patBaseCache[victim].stamp = s_patBaseCacheStamp++;
+  copyTrimmed(s_patBaseCache[victim].base, sizeof(s_patBaseCache[victim].base), tmp);
+
+  copyTrimmed(outBase, outSize, tmp);
+  return true;
+}
+
 void loadSongsFromFolder(const char *path, SongInfo *arr, uint8_t &count) {
   count = 0;
   if(!sdOK) return;
@@ -256,7 +355,7 @@ bool buildCurrentPatternFilePath(char *outPath, size_t outSize) {
   if (patListCursor >= (int16_t)cnt) patListCursor = cnt - 1;
 
   char base[FILEBASE_LEN];
-  if (!getPatternFileBaseByGenreIndex(gidx, (uint8_t)patListCursor,
+  if (!getPatternFileBaseByGenreIndex_cached(gidx, (uint8_t)patListCursor,
                                       base, sizeof(base))) {
     return false;
   }
