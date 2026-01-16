@@ -61,7 +61,7 @@ void loadPatternIndexFile() {
     // 혹시 옛날 구조를 그대로 쓰고 있다면 /SYSTEM/ 도 한 번 더 시도
     f = SD.open("/SYSTEM/INDEX.TXT");
     if (!f) {
-      lcdPrintLines("INDEX.TXT ERR  ", "/PATTERNS or SYSTEM");
+      lcdPrintLines(F("INDEX.TXT ERR  "), F("/PATTERNS or SYSTEM"));
       delay(1000);
       return;
     }

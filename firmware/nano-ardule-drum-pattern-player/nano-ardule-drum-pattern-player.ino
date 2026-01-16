@@ -18,6 +18,15 @@
 #include "GMDrumNames.h"
 #include <hd44780ioClass/hd44780_I2Cexp.h>
 
+// Built-in (emergency) pattern payload/index (stored in flash)
+// NOTE: EMERGENCY_PATTERN_COUNT is defined in emergency_payload.h
+#include "emergency_index.h"
+#include "emergency_payload.h"
+
+// Engine helpers are implemented in other .ino units; forward-declare to
+// avoid Arduino concatenation ordering issues.
+void stopAllPlaybackAndReset(bool toIdle);
+
 // SONG UI preview: read BPM from selected .MID/.ADS
 bool readSongBpmFromPath(const char *path, bool isAds, uint16_t &bpmOut);
 
@@ -263,6 +272,7 @@ GenreSortMode genreSortMode = SORT_COUNT_DESC;
 
 // A6 short-press uses release-click detection (to avoid firing on long-press)
 uint32_t metroDownMs = 0;
+uint32_t encDownMs = 0;
 
 // Forward declarations (implemented in ArduleUI / ArduleStorage)
 void rebuildGenreOrder();
@@ -316,6 +326,18 @@ struct SongInfo {
 
 SongInfo drumSongs[MAX_SONGS];
 SongInfo multiSongs[MAX_SONGS];
+
+// ===== INTERNAL MODE (Built-in patterns) =====
+// These symbols are defined in ArduleInternal_*.ino, which may be concatenated
+// after this main file by the Arduino build system. Forward declarations keep
+// compilation order-independent.
+extern uint8_t internalCursor;
+// When true, PAT_LIST/PAT_SINGLE screens browse built-in (flash) patterns instead of SD patterns.
+bool internalBrowserActive = false;
+extern bool internalModePlaying;
+void startInternalPatternPlayback(uint8_t patternId);
+void stopAllPlaybackAndReset(bool toIdle);
+
 
 // ===== SETTINGS (Module / Metronome Sound) =====
 enum ModuleType : uint8_t {
@@ -507,14 +529,14 @@ void setup() {
   lcd.createChar(CHAR_UP, charUp);
   lcd.createChar(CHAR_DOWN, charDown);
 
-  lcdPrintLines("Nano Ardule v2.5", "ADP singleBuf  ");
+  lcdPrintLines(F("Nano Ardule v2.5"), F("ADP singleBuf  "));
   delay(1000);
 
   if(SD.begin(SD_CS_PIN)) {
     sdOK = true;
   } else {
     sdOK = false;
-    lcdPrintLines("SD INIT FAIL   ", "INTERNAL MODE  ");
+    lcdPrintLines(F("SD INIT FAIL   "), F("INTERNAL MODE  "));
     delay(1000);
     uiMode = UIMODE_INTERNAL;
   }
@@ -580,7 +602,14 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
   serviceSongPlayback();
   updateMetronome();
 
-  bool encLong   = checkLongPressState(ENC_BTN_PIN,   lpEnc,   nowMs);
+  bool encLong = false;
+  // Encoder long-press: fire on RELEASE after holding >= LONG_PRESS_MS
+  bool encDownNow = (digitalRead(ENC_BTN_PIN) == LOW);
+  if (encDownNow && encDownMs == 0) encDownMs = nowMs;
+  if (!encDownNow && encDownMs != 0) {
+    if ((nowMs - encDownMs) >= LONG_PRESS_MS) encLong = true;
+    encDownMs = 0;
+  }
   bool metroLong = checkLongPressState(BTN_METRO,     lpMetro, nowMs);
 
   if(metroLong && uiMode != UIMODE_METRO) {
@@ -593,11 +622,16 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
     showMetronomeScreen();
   }
 
-  if(internalClick) {
+  // Enter INTERNAL mode only from top menu to keep UX predictable.
+  if(internalClick && uiMode == UIMODE_MAIN) {
     indicateButtonFeedback();
     stopAllPlaybackAndReset(true);
-    uiMode = UIMODE_INTERNAL;
-    showInternalModeScreen();
+    internalModePlaying = false;
+    internalCursor = 0;
+    internalBrowserActive = true;
+    uiMode = UIMODE_PAT_LIST;
+    patListCursor = 0;
+    showPatternListScreen();
   }
 
   switch(uiMode) {
@@ -627,8 +661,13 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
           uiMode = UIMODE_METRO;
           showMetronomeScreen();
         } else if(mainCursor == MM_INTERNAL) {
-          uiMode = UIMODE_INTERNAL;
-          showInternalModeScreen();
+          stopAllPlaybackAndReset(true);
+          internalModePlaying = false;
+          internalCursor = 0;
+          internalBrowserActive = true;
+          uiMode = UIMODE_PAT_LIST;
+          patListCursor = 0;
+          showPatternListScreen();
         } else if(mainCursor == MM_SETTINGS) {
           uiMode = UIMODE_SETTINGS;
           settingsUiMode = SETTINGS_UI_MENU;
@@ -812,7 +851,12 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
     case UIMODE_PAT_LIST:
       if(delta != 0) {
         patListCursor += (delta > 0 ? 1 : -1);
-        if(genreCount > 0) {
+        if (internalBrowserActive) {
+          int16_t cnt = (int16_t)EMERGENCY_PATTERN_COUNT;
+          if (patListCursor < 0) patListCursor = 0;
+          if (cnt > 0 && patListCursor >= cnt) patListCursor = cnt - 1;
+          internalCursor = (uint8_t)patListCursor;
+        } else if(genreCount > 0) {
           uint8_t cnt = genres[currentGenreIndex].count;
           if(patListCursor < 0) patListCursor = 0;
           if(patListCursor >= (int16_t)cnt) patListCursor = cnt-1;
@@ -825,16 +869,30 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
         playState = PLAYSTATE_IDLE;
         previewAllMode   = false;
         previewLoopCount = 0;
+        if (internalBrowserActive) {
+          internalCursor = (uint8_t)patListCursor;
+          internalModePlaying = false; // READY only, do not auto-play
+        }
         showPatternPlayScreen();
       }
       if(playClick) {
-        indicateButtonFeedback();
-        startAutoPatternPreview();
+        if (!internalBrowserActive) {
+          // SD pattern list: start preview-all mode (original behavior)
+          indicateButtonFeedback();
+          startAutoPatternPreview();
+        }
       }
       if(stopClick) {
         indicateButtonFeedback();
-        uiMode = UIMODE_PAT_GEN;
-        showPatternGenreScreen();
+        if (internalBrowserActive) {
+          // INTERNAL browser: STOP returns to Main Menu (no genre screen)
+          internalBrowserActive = false;
+          uiMode = UIMODE_MAIN;
+          showMainMenuScreen();
+        } else {
+          uiMode = UIMODE_PAT_GEN;
+          showPatternGenreScreen();
+        }
       }
       break;
 
@@ -875,9 +933,16 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
         } else {
           // 단일 패턴 모드: 기존 동작 유지 (PLAY / STOP)
           if (playState == PLAYSTATE_IDLE) {
-            startSinglePatternPlayback();
+            if (internalBrowserActive) {
+              // Internal patterns: do NOT auto-play on list entry; play starts only here.
+              startInternalPatternPlayback(internalCursor);
+              internalModePlaying = true;
+            } else {
+              startSinglePatternPlayback();
+            }
           } else {
             stopAllPlaybackAndReset(true);
+            if (internalBrowserActive) internalModePlaying = false;
           }
         }
 
@@ -929,9 +994,18 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
         previewAllMode   = false;
         previewLoopCount = 0;
         stopAllPlaybackAndReset(true);
-        uiMode = UIMODE_PAT_LIST;
-        patListCursor = 0;
-        showPatternListScreen();
+
+        // Return to the correct list depending on source
+        if (internalBrowserActive) {
+          internalModePlaying = false;
+          uiMode = UIMODE_PAT_LIST;
+          // keep patListCursor/internalCursor as-is
+          showPatternListScreen();
+        } else {
+          uiMode = UIMODE_PAT_LIST;
+          patListCursor = 0;
+          showPatternListScreen();
+        }
       }
       break;
 
@@ -989,13 +1063,38 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
       break;
 
     case UIMODE_INTERNAL:
+      if(delta != 0) {
+        int16_t v = (int16_t)internalCursor + (delta > 0 ? 1 : -1);
+        if(v < 0) v = 0;
+        if(v >= (int16_t)EMERGENCY_PATTERN_COUNT) v = (int16_t)EMERGENCY_PATTERN_COUNT - 1;
+        internalCursor = (uint8_t)v;
+        showInternalModeScreen();
+      }
+
+      // Play selected built-in pattern
+      if(playClick || encClick) {
+        indicateButtonFeedback();
+        if(internalModePlaying && playState == PLAYSTATE_PLAYING) {
+          // Stop
+          stopAllPlaybackAndReset(true);
+          internalModePlaying = false;
+        } else {
+          startInternalPatternPlayback(internalCursor);
+          uiMode = UIMODE_PAT_SINGLE;
+          showPatternPlayScreen();
+        }
+        // stay on Pattern Play screen
+}
+
       if(stopClick) {
         indicateButtonFeedback();
-        if(sdOK) {
+        if(internalModePlaying) {
+          stopAllPlaybackAndReset(true);
+          internalModePlaying = false;
+          showInternalModeScreen();
+        } else {
           uiMode = UIMODE_MAIN;
           showMainMenuScreen();
-        } else {
-          showInternalModeScreen();
         }
       }
       break;

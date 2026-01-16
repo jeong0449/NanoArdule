@@ -27,6 +27,30 @@ static bool patFirstTick = true;
 // PAUSED → PLAYING으로 돌아올 때 루프를 깨끗이 재시작하기 위한 플래그
 static PlayState lastPatternPlayState = PLAYSTATE_IDLE;
 
+// Forward declarations (needed in some Arduino build setups when code is split
+// across multiple .ino files and auto-prototypes are not generated reliably).
+void startBeatEngine();
+
+//////////////////// Pattern start helper ////////////////////
+// Both SD-based patterns and INTERNAL (built-in) patterns must start
+// with the *exact* same timing/reset semantics, otherwise we can get
+// an initial "catch-up" burst and LED misalignment.
+void beginLoadedPatternPlayback() {
+  // 새 패턴을 시작하므로 Preview All 루프 카운트도 리셋
+  previewLoopCount = 0;
+
+  // 패턴 이벤트 인덱스/타이밍 리셋
+  patEventIndex  = 0;
+  patFirstTick   = true;
+
+  // 패턴 재생 + 비트/LED 엔진 시작
+  playSource           = PLAY_SRC_PATTERN;
+  playState            = PLAYSTATE_PLAYING;
+  lastPatternPlayState = PLAYSTATE_PLAYING;
+
+  startBeatEngine();
+}
+
 //////////////////// Beat / BPM ////////////////////
 
 void updateBeatTimingFromBpm() {
@@ -397,19 +421,7 @@ void startSinglePatternPlayback() {
   if (!buildCurrentPatternFilePath(currentFilePath, sizeof(currentFilePath))) return;
   if (!loadCurrentPatternIntoMemory()) return;
 
-  // 새 패턴을 시작하므로 Preview All 루프 카운트도 리셋
-  previewLoopCount = 0;
-
-  // 패턴 이벤트 인덱스/타이밍 리셋
-  patEventIndex  = 0;
-  patFirstTick   = true;
-
-  // 패턴 재생 + 비트/LED 엔진 시작
-  playSource              = PLAY_SRC_PATTERN;
-  playState               = PLAYSTATE_PLAYING;
-  lastPatternPlayState    = PLAYSTATE_PLAYING;  // 초기화
-
-  startBeatEngine();
+  beginLoadedPatternPlayback();
 }
 
 void startAutoPatternPreview() {
@@ -562,11 +574,14 @@ void servicePatternPlayback() {
   }
 
   // 현재 시각(nowUs)까지 도달한 이벤트를 모두 발사
+  uint8_t emitted = 0;
+  const uint8_t MAX_EVENTS_PER_SERVICE = 8;
   while (patEventIndex < patEventCount) {
     uint32_t evUs = patLoopStartUs
                   + (uint32_t)patEvents[patEventIndex].tick * usPerTick;
 
     if (nowUs < evUs) break;
+
 
     uint8_t st   = patEvents[patEventIndex].status;
     uint8_t d1   = patEvents[patEventIndex].d1;
@@ -581,6 +596,8 @@ void servicePatternPlayback() {
     }
 
     patEventIndex++;
+    emitted++;
+    if (emitted >= MAX_EVENTS_PER_SERVICE) break;
   }
 }
 
