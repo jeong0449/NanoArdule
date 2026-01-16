@@ -273,6 +273,7 @@ GenreSortMode genreSortMode = SORT_COUNT_DESC;
 // A6 short-press uses release-click detection (to avoid firing on long-press)
 uint32_t metroDownMs = 0;
 uint32_t encDownMs = 0;
+bool     encLongFired = false;
 
 // Forward declarations (implemented in ArduleUI / ArduleStorage)
 void rebuildGenreOrder();
@@ -603,12 +604,20 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
   updateMetronome();
 
   bool encLong = false;
-  // Encoder long-press: fire on RELEASE after holding >= LONG_PRESS_MS
+  // Encoder long-press: fire ON-HOLD (not on release), once per press.
+  // NOTE: Encoder click is handled separately; long-press should NOT require release.
   bool encDownNow = (digitalRead(ENC_BTN_PIN) == LOW);
-  if (encDownNow && encDownMs == 0) encDownMs = nowMs;
-  if (!encDownNow && encDownMs != 0) {
-    if ((nowMs - encDownMs) >= LONG_PRESS_MS) encLong = true;
+  if (encDownNow) {
+    if (encDownMs == 0) {
+      encDownMs = nowMs;
+      encLongFired = false;
+    } else if (!encLongFired && (nowMs - encDownMs) >= LONG_PRESS_MS) {
+      encLong = true;
+      encLongFired = true;
+    }
+  } else {
     encDownMs = 0;
+    encLongFired = false;
   }
   bool metroLong = checkLongPressState(BTN_METRO,     lpMetro, nowMs);
 
