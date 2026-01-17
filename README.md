@@ -5,7 +5,7 @@
 
 **Ardule** is a complete open ecosystem for drum-pattern creation, conversion, playback, and analysis.  
 It integrates **Arduino-based real-time drum engines**, a Python-based pattern studio (APS), a curated pattern library,  
-and a family of **lightweight pattern formats (ADT, ADP, ADS, ARR)**.
+and a family of **lightweight pattern formats (ADT, ADP, ARR, ADS)**.
 
 With the addition of the **ADC Toolchain (adc- prefix)**, Ardule now supports automated conversion of MIDI drum patterns into ADT format, enabling seamless integration of external rhythm material into the ecosystem.
 
@@ -28,11 +28,10 @@ For detailed hardware documentation, including schematics and implementation not
 
 ## Firmware Scope
 
-This repository primarily focuses on the **Drum Pattern Player firmware**, 
-which was originally designed around the ADT/ADP-based drum pattern playback engine 
-as the reference implementation of the Ardule pattern system, and has since been 
-extended to support song-level playback through compiled ADS (Ardule Data Stream) 
-execution, as well as direct playback of Standard MIDI Files (Type 0).
+This repository primarily focuses on the **Nano Ardule Drum Pattern Player firmware**, which serves as the reference implementation of the Ardule pattern system. The firmware was originally designed around an ADT/ADP-based drum pattern playback engine, and has since been extended to support song-level playback through compiled ADS (Ardule Data Stream), as well as direct playback of Standard MIDI Files (Type 0), all implemented without relying on external MIDI playback libraries.
+
+Another firmware variant, the **Nano Ardule MIDI Controller**, is also publicly available within this repository. This variant focuses on real-time MIDI control features such as program change, layering, and splitting, and includes experimental support for direct playback of Standard MIDI Files (Type 0), as demonstrated in a separate video (https://www.youtube.com/watch?v=ZyeiwCxAJcU). While it shares the same codebase, it is distinct in scope from the Drum Pattern Player firmware and is not intended as the primary reference implementation of the Ardule pattern system.
+
 
 Another firmware variant, the **MIDI Controller** (e.g. a **Type-0 MIDI file
 player** with program change, layering, splitting, and more; see the demo
@@ -40,16 +39,7 @@ video on YouTube: https://www.youtube.com/watch?v=ZyeiwCxAJcU), exists
 internally and is not part of the public release at this time, but **may be
 published in the future as the project evolves and matures**.
 
-This firmware is designed as a real-time drum pattern engine for
-**Arduino Nano / Nano Every**.
-
-
-- ADS streaming engine  
-- GM/GS/XG CH10 playback  
-- Program Change kit switching  
-- LCD user interface  
-- MicroSD pattern library  
-- MIDI routing  
+Each firmware variant is designed for a different Arduino Nano platform: the Drum Pattern Player firmware targets newer Arduino Nano variants with expanded memory, while the MIDI Controller firmware is intended for classic Arduino Nano–class boards. Although they share parts of the codebase and coexist within the same repository, the two firmwares differ in scope, hardware assumptions, and intended use.
 
 ---
 
@@ -77,8 +67,8 @@ Core features include:
 |--------|---------|---------|
 | **ADT** | Editable 2-bar text pattern | Human-readable velocity symbols |
 | **ADP** | Binary runtime pattern | Compact, fast parsing |
-| **ADS** | Performance stream | Compiled chain + metadata |
 | **ARR** | Chain description | Sections, repeats, transitions |
+| **ADS** | Performance stream | Compiled chain + metadata |
 
 > **Note on terminology**
 >
@@ -108,6 +98,7 @@ The ADC Toolchain converts external MIDI drum patterns into **ADT v2.2/v2.2a** f
 | [`adc-mid2adt.py`](./tools/adc-mid2adt.py) | Convert 2-bar drum MIDI files to ADT v2.2a with auto grid detection and velocity symbols (. - X O). |
 | [`adc-adt2adp.py`](./tools/adc-adt2adp.py) | Convert ADT v2.2a drum patterns to ADP v2.2 binary cache (fast load), with canonical velocity symbols (. - X O). |
 | [`adc-mkindex.py`](./tools/adc-mkindex.py) | Scan ADP v2.2a pattern files and generate /SYSTEM/INDEX.TXT for Ardule/APS (genre, grid, length, CRC, size). |
+| [`adc-arrtool.py`](./tools/adc-arrtool.py) | Process ARR files to expand pattern chains, resolve bar structure, and generate song-level data for ADS compilation and playback. |
 
 
 ### Example Workflow
@@ -120,6 +111,7 @@ python .\tools\adc-split-drum-2bar-save.py --print-genre-only .\6AFROCUB.MID
 python .\tools\adc-mid2adt.py --in-dir MID --out-dir ADT
 python .\tools\adc-adt2adp.py --in-dir ADT --out-dir ADP
 python .\tools\adc-mkindex.py --patterns .\ADP --out ..\SD\SYSTEM
+python .\tools\adc-arrtool.py --format both .\patterns\SONG_001.ARR --countin 4
 ```
 
 ---
