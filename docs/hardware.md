@@ -49,7 +49,7 @@ Because A6 does not support the internal pull-up resistor, an **external pull-up
 | D2 | Rotary Encoder CLK | - |
 | D3 | Rotary Encoder DT | - |
 | D4 | Encoder SW | - |
-| D5 | MULTI Button | INTERNAL Pattern Mode |
+| D5 | MULTI Button | INTERNAL Pattern Mode (long press)|
 | D6 | STOP / EXIT Button | - |
 | D7 | SAVE / + Button | STEP + |
 | D8 | LOAD / − Button | STEP − |
@@ -64,7 +64,7 @@ Because A6 does not support the internal pull-up resistor, an **external pull-up
 | A3 | PLAY / PAUSE Button | - |
 | A4 | LCD SDA | - |
 | A5 | LCD SCL | - |
-| A6 | PART SELECT Button | Genre / Sort / Function |
+| A6 | PART SELECT Button | Genre / Sort / Function (long press)|
 
 ---
 
