@@ -27,6 +27,27 @@ static bool patFirstTick = true;
 // PAUSED → PLAYING으로 돌아올 때 루프를 깨끗이 재시작하기 위한 플래그
 static PlayState lastPatternPlayState = PLAYSTATE_IDLE;
 
+// MULTI song-start burst guard
+//
+// Symptom:
+// - In MULTI SONG playback, the very beginning can sound like a short "burst"
+//   where the first notes feel clumped together.
+//
+// Cause (typical):
+// - SD open / header parsing can take time.
+// - If the MIDI event scheduler's time base (nextEventUs) is armed *before*
+//   the blocking work finishes, the first service loop tries to "catch up"
+//   and quickly emits early events.
+//
+// Strategy (MULTI only):
+// - Re-arm the MIDI scheduler's time base right after the file is opened.
+// - During a short warm-up window, clamp large backlogs to avoid catch-up bursts.
+static bool     multiSongBurstGuard = false;
+static uint32_t multiSongStartUs    = 0;
+
+// 0 = DRUM, 1 = MULTI (defined in the main sketch).
+extern int16_t songsRootCursor;
+
 // Forward declarations (needed in some Arduino build setups when code is split
 // across multiple .ino files and auto-prototypes are not generated reliably).
 void startBeatEngine();
@@ -503,6 +524,20 @@ void startSongPlayback() {
     if (!openCurrentMidiSongFile()) return;
   }
 
+  // Enable burst guard ONLY for MULTI songs, and only for Type 0 MIDI playback.
+  // (DRUM songs + INTERNAL patterns are left untouched.)
+  multiSongBurstGuard = (!currentSongIsADS && (songsRootCursor != 0));
+  if (multiSongBurstGuard) {
+    // Re-arm the scheduler time base AFTER file-open work.
+    // This prevents SD latency from being counted as "song time".
+    uint32_t nowUs = micros();
+    multiSongStartUs = nowUs;
+    nextEventUs   = nowUs;
+    haveNextEvent = false;
+    endOfTrack    = false;
+    runningStatus = 0;
+  }
+
   playSource = PLAY_SRC_SONG;
   // SONG의 playState 변경은 startBeatEngine()에서 담당
   startBeatEngine();
@@ -609,6 +644,21 @@ void serviceSongPlayback() {
   if (endOfTrack)                     return;
 
   uint32_t nowUs = micros();
+
+  // MULTI warm-up: avoid "catch-up" bursts at the very beginning.
+  // If SD latency (or any other blocking work) made nextEventUs lag far behind,
+  // clamping the backlog once keeps early notes from being emitted too quickly.
+  if (multiSongBurstGuard) {
+    uint32_t elapsed = nowUs - multiSongStartUs;
+    if (elapsed < 450000UL) { // first 300ms only
+      if (nowUs > (nextEventUs + 50000UL)) { // backlog > 50ms
+        nextEventUs = nowUs;
+        haveNextEvent = false;
+      }
+    } else {
+      multiSongBurstGuard = false;
+    }
+  }
 
   if (!haveNextEvent) {
     uint32_t deltaTicks = readVariableLength(playFile);
