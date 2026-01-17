@@ -17,6 +17,10 @@
 //
 
 void rebuildGenreOrder();
+// --- UI hook for SD-busy indication (implemented in ArduleUI_113025_v2_5.ino) ---
+extern void uiSdBusyBegin();
+extern void uiSdBusyEnd();
+
 
 void trimLineEnding(char *s) {
   int i = 0;
@@ -173,10 +177,11 @@ bool getPatternFileBaseByGenreIndex(uint8_t gidx, uint8_t nth,
   if (!sdOK) return false;
   if (gidx >= genreCount) return false;
 
+  uiSdBusyBegin();
   File f = SD.open("/PATTERNS/INDEX.TXT");
   if (!f) {
     f = SD.open("/SYSTEM/INDEX.TXT");
-    if (!f) return false;  // 둘 다 없으면 실패
+    if (!f) { uiSdBusyEnd(); return false; }  // 둘 다 없으면 실패
   }
 
   char buf[128];
@@ -186,6 +191,7 @@ bool getPatternFileBaseByGenreIndex(uint8_t gidx, uint8_t nth,
     int len = f.readBytesUntil('\n', buf, sizeof(buf) - 1);
     if (len <= 0) {
       f.close();
+      uiSdBusyEnd();
       return false;
     }
     buf[len] = '\0';
@@ -224,12 +230,14 @@ bool getPatternFileBaseByGenreIndex(uint8_t gidx, uint8_t nth,
       stripFileExtension(tok_file);               // ".ADP" 제거
       copyTrimmed(outBase, outSize, tok_file);    // 결과 복사
       f.close();
+      uiSdBusyEnd();
       return true;
     }
     countInGenre++;
   }
 
   f.close();
+  uiSdBusyEnd();
   return false;
 }
 
