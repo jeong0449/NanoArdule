@@ -204,6 +204,8 @@ cd NanoArdule
 pip install -r APS/requirements.txt
 python APS/aps_main.py
 ```
+A provisional APS manual written in Korean is available at:
+https://genoglobe.com/dokuwiki/nano_ardule_midi_controller/aps_manual
 
 ---
 
