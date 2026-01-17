@@ -32,13 +32,6 @@ This repository primarily focuses on the **Nano Ardule Drum Pattern Player firmw
 
 Another firmware variant, the **Nano Ardule MIDI Controller**, is also publicly available within this repository. This variant focuses on real-time MIDI control features such as program change, layering, and splitting, and includes experimental support for direct playback of Standard MIDI Files (Type 0), as demonstrated in a separate video (https://www.youtube.com/watch?v=ZyeiwCxAJcU). While it shares the same codebase, it is distinct in scope from the Drum Pattern Player firmware and is not intended as the primary reference implementation of the Ardule pattern system.
 
-
-Another firmware variant, the **MIDI Controller** (e.g. a **Type-0 MIDI file
-player** with program change, layering, splitting, and more; see the demo
-video on YouTube: https://www.youtube.com/watch?v=ZyeiwCxAJcU), exists
-internally and is not part of the public release at this time, but **may be
-published in the future as the project evolves and matures**.
-
 Each firmware variant is designed for a different Arduino Nano platform: the Drum Pattern Player firmware targets newer Arduino Nano variants with expanded memory, while the MIDI Controller firmware is intended for classic Arduino Nano–class boards. Although they share parts of the codebase and coexist within the same repository, the two firmwares differ in scope, hardware assumptions, and intended use.
 
 ---
