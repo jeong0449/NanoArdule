@@ -532,10 +532,15 @@ void startSongPlayback() {
     // This prevents SD latency from being counted as "song time".
     uint32_t nowUs = micros();
     multiSongStartUs = nowUs;
-    nextEventUs   = nowUs;
-    haveNextEvent = false;
-    endOfTrack    = false;
-    runningStatus = 0;
+    nextEventUs      = nowUs;
+    haveNextEvent    = false;
+    endOfTrack       = false;
+    runningStatus    = 0;
+
+    // --- NEW: start delay (MULTI MIDI only) ---
+    const uint32_t START_DELAY_US = 200000UL; // 200 ms
+    nextEventUs      += START_DELAY_US;
+    multiSongStartUs += START_DELAY_US; // keep burst-guard window aligned
   }
 
   playSource = PLAY_SRC_SONG;
