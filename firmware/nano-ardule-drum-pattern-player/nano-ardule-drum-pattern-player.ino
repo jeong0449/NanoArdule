@@ -1005,6 +1005,8 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
         if (previewAllMode) {
           // 프리뷰 ALL 모드: 재생 / 일시정지 토글
           if (playState == PLAYSTATE_PLAYING) {
+            // PAUSE must silence any sustained notes immediately.
+            // (All Sound Off + All Notes Off + Sustain Off)
             playState = PLAYSTATE_PAUSED;
           } else if (playState == PLAYSTATE_PAUSED) {
             playState = PLAYSTATE_PLAYING;
@@ -1212,6 +1214,12 @@ bool metroClick    = readButtonReleaseClick(BTN_METRO, latchMetro, metroDownMs, 
         if (playState == PLAYSTATE_IDLE) {
           startSongPlayback();
         } else if (playState == PLAYSTATE_PLAYING) {
+          // In SONG playback, PAUSE must immediately stop any sounding notes.
+          // This is especially important for MULTI (Type-0 MIDI) playback,
+          // where Note Off events are scheduled in the future.
+          if (songsRootCursor == 1) {
+            sendMidiPanic();
+          }
           songPauseStartUs = micros();
           playState        = PLAYSTATE_PAUSED;
         } else if (playState == PLAYSTATE_PAUSED) {
