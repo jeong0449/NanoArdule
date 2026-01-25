@@ -34,6 +34,12 @@ Another firmware variant, the **Nano Ardule MIDI Controller**, is also publicly 
 
 Each firmware variant is designed for a different Arduino Nano platform: the Drum Pattern Player firmware targets newer Arduino Nano variants with expanded memory, while the MIDI Controller firmware is intended for classic Arduino Nano–class boards. Although they share parts of the codebase and coexist within the same repository, the two firmwares differ in scope, hardware assumptions, and intended use.
 
+### Companion Firmware
+
+- **Ardule USB MIDI Host**  
+  A side project that provides reliable USB MIDI ingress for Nano Ardule,  
+  implemented on Arduino UNO + USB Host Shield (MAX3421E).
+
 ---
 
 ## 3. Ardule Pattern Studio — APS
