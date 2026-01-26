@@ -37,7 +37,7 @@ Each firmware variant is designed for a different Arduino Nano platform: the Dru
 ### Companion Firmware
 
 - **Ardule USB MIDI Host**  
-  A side project that provides reliable USB MIDI ingress for Nano Ardule, implemented on Arduino UNO + USB Host Shield (MAX3421E).
+  A side project, [`Ardule USB MIDI Host`](./firmware/ardule_usb_midi_host) that provides reliable USB MIDI ingress for Nano Ardule, implemented on Arduino UNO + USB Host Shield (MAX3421E).
 
 ---
 
