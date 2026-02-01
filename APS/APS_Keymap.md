@@ -111,6 +111,18 @@ Notes:
   - Second bar is visually disabled but editable
 - Bar separators are explicitly shown
 
+### Bar Playback Range Selection
+
+In Step Sequencer, pressing `L` cycles the playback range of the current pattern
+in the following order:
+
+- **1st bar** → **2nd bar** → **Full bar**
+
+This selection affects playback only and does not modify pattern data.
+It is useful for focusing on a specific bar while editing or auditioning
+rhythmic details.
+
+
 ---
 
 ## Design Notes (Mental Model)
