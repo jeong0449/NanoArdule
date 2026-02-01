@@ -109,6 +109,7 @@ from aps_ui import (
 
 )
 from aps_chainedit import handle_chain_keys
+import aps_chainedit as chainedit_mod
 from aps_countin import get_countin_presets  # Built-in count-in patterns (for name/meta)
 
 try:
@@ -2424,6 +2425,32 @@ bpm=bpm,
                 selected_idx,
                 push_undo,
             )
+            # ------------------------------------------------------------
+            # CHAIN_UI_REQUEST handling (from aps_chainedit)
+            # - Important: section edit modifies section_mgr metadata only.
+            # - We must run the UI dialog here (main owns stdscr) and then
+            #   sync ChainEntry.section labels so redraw/scroll stays correct.
+            # ------------------------------------------------------------
+            try:
+                req = getattr(chainedit_mod, "CHAIN_UI_REQUEST", None)
+                if isinstance(req, dict) and req.get("type") == "section_edit":
+                    # Run the existing section overview/editor UI
+                    try:
+                        # Some builds accept (stdscr, section_mgr, chain, cursor_idx)
+                        show_section_overview_curses(stdscr, section_mgr, chain, req.get("cursor_idx", chain_selected_idx))
+                    except TypeError:
+                        # Fallback: older signature (stdscr, section_mgr, chain)
+                        show_section_overview_curses(stdscr, section_mgr, chain)
+
+                    # After editing sections, refresh per-entry labels for rendering
+                    _sync_chain_section_labels_from_mgr()
+
+                    # Clear the request so it won't re-trigger
+                    chainedit_mod.CHAIN_UI_REQUEST = None
+            except Exception:
+                # Non-fatal: never break main loop due to UI request issues
+                pass
+
             # --- Status bar message for L key ---
             if ch in (ord('l'), ord('L')) and changed and chain and 0 <= chain_selected_idx < len(chain):
                 _new_bars = getattr(chain[chain_selected_idx], 'bars', 'F')

@@ -1,62 +1,165 @@
-# aps_arr.py — ARR save/load helpers for APS v0.27
+# aps_arr.py — ARR save/load helpers for APS v0.27 (patched: SECTION roundtrip)
 
 from __future__ import annotations
 import os
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from aps_core import ChainEntry
+
+
+def _infer_sections_from_chain(chain: List[ChainEntry]) -> Dict[str, Tuple[int, int]]:
+    """
+    Infer section ranges from ChainEntry.section labels.
+
+    Returns:
+        Dict[name, (start0, end0)]  # 0-based inclusive indices
+
+    Notes:
+    - Only non-empty section names are exported.
+    - If the same section name appears in multiple disjoint runs,
+      it will be exported as name, name_2, name_3, ... to avoid collisions.
+    """
+    sections: Dict[str, Tuple[int, int]] = {}
+    if not chain:
+        return sections
+
+    def _unique_name(base: str) -> str:
+        if base not in sections:
+            return base
+        i = 2
+        while f"{base}_{i}" in sections:
+            i += 1
+        return f"{base}_{i}"
+
+    cur_name: Optional[str] = None
+    cur_start: Optional[int] = None
+
+    def _flush(end_idx: int):
+        nonlocal cur_name, cur_start
+        if cur_name and cur_start is not None and cur_start <= end_idx:
+            name = _unique_name(cur_name)
+            sections[name] = (cur_start, end_idx)
+        cur_name = None
+        cur_start = None
+
+    for i, e in enumerate(chain):
+        name = getattr(e, "section", None)
+        if name is not None:
+            name = str(name).strip()
+        if not name:
+            # Leaving/ending a section run
+            if cur_name is not None:
+                _flush(i - 1)
+            continue
+
+        # Entering a new run
+        if cur_name is None:
+            cur_name = name
+            cur_start = i
+            continue
+
+        # Continuing same section run
+        if name == cur_name:
+            continue
+
+        # Section name changed -> close previous run, start new
+        _flush(i - 1)
+        cur_name = name
+        cur_start = i
+
+    # Flush last run
+    if cur_name is not None and cur_start is not None:
+        _flush(len(chain) - 1)
+
+    return sections
+
+
+def _apply_sections_to_chain(chain: List[ChainEntry], sections: Dict[str, Tuple[int, int]]) -> None:
+    """
+    Apply section ranges onto ChainEntry.section labels.
+    sections uses 0-based inclusive ranges.
+    """
+    if not chain or not sections:
+        return
+
+    n = len(chain)
+
+    # Clear existing labels first (optional; helps make load deterministic)
+    for e in chain:
+        if hasattr(e, "section"):
+            setattr(e, "section", None)
+
+    # Apply in a stable order: by start index, then name
+    for name, (s, e) in sorted(sections.items(), key=lambda kv: (kv[1][0], kv[0])):
+        try:
+            s0 = int(s)
+            e0 = int(e)
+        except Exception:
+            continue
+        if s0 > e0:
+            s0, e0 = e0, s0
+        s0 = max(0, min(s0, n - 1))
+        e0 = max(0, min(e0, n - 1))
+        for i in range(s0, e0 + 1):
+            setattr(chain[i], "section", name)
 
 
 def save_arr(path: str, chain: List[ChainEntry], bpm: int) -> None:
     """
-    체인과 BPM을 간단한 텍스트 ARR 포맷으로 저장한다.
+    Save chain and BPM into a simple text ARR format.
 
-    포맷 예시:
-        # APS ARR v1
+    Also exports SECTION metadata inferred from ChainEntry.section:
+
+        #ARR
         BPM=120
+
+        #SECTION Verse 1 8
+        #SECTION Chorus 9 16
 
         1=POP_P001.ADP
         2=POP_B001.ADP
-        3=POP_P002.ADP
 
-        MAIN|1x2,2,3x4
-
-    - 앞부분의 숫자=파일명 부분은 POOL (패턴 목록)
-    - MAIN 라인은 인덱스와 반복 횟수(xN)를 나열한 시퀀스
+        MAIN|1x2,2,1,2
+        BARS|F,A,F,B
     """
-
-    # 체인에서 등장하는 파일명을 순서대로 유니크하게 모은다.
+    # Pool: unique filenames in order of appearance
     pool: List[str] = []
     for entry in chain:
         if entry.filename not in pool:
             pool.append(entry.filename)
 
-    # 파일명 -> 번호 매핑
     idx_map = {fn: i + 1 for i, fn in enumerate(pool)}
 
-    # MAIN 시퀀스 만들기
-    seq_parts = []
+    # MAIN sequence
+    seq_parts: List[str] = []
     for entry in chain:
         i = idx_map[entry.filename]
-        
-        if int(getattr(entry, "repeats", 1) or 1) > 1:
-            rep = int(getattr(entry, "repeats", 1) or 1)
+        rep = int(getattr(entry, "repeats", 1) or 1)
+        if rep > 1:
             seq_parts.append(f"{i}x{rep}")
         else:
             seq_parts.append(str(i))
-
     main_line = "MAIN|" + ",".join(seq_parts)
 
     # Optional BARS line (1:1 with MAIN entries). Default is F.
-    # - Tokens: F (full), A (1st bar), B (2nd bar)
-    # - If all entries are F, omit the BARS| line for backwards compatibility.
     bars_tokens = [str(getattr(e, "bars", "F") or "F").upper()[:1] for e in chain]
     has_non_full = any(t in ("A", "B") for t in bars_tokens)
     bars_line = "BARS|" + ",".join(bars_tokens) if has_non_full else None
+
+    # SECTION lines inferred from ChainEntry.section (0-based -> 1-based)
+    sections = _infer_sections_from_chain(chain)
+    section_lines: List[str] = []
+    for name, (s0, e0) in sorted(sections.items(), key=lambda kv: (kv[1][0], kv[0])):
+        section_lines.append(f"#SECTION {name} {s0 + 1} {e0 + 1}")
 
     lines: List[str] = []
     lines.append("#ARR")
     lines.append(f"BPM={bpm}")
     lines.append("")
+
+    # SECTION metadata (optional)
+    if section_lines:
+        lines.extend(section_lines)
+        lines.append("")
 
     # POOL
     for i, fn in enumerate(pool, start=1):
@@ -71,6 +174,7 @@ def save_arr(path: str, chain: List[ChainEntry], bpm: int) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
+
 def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
     """
     Parse an ARR file and restore its chain, BPM, and section metadata.
@@ -78,10 +182,9 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
     Returns:
         (chain, bpm, sections)
 
-        - chain: List[ChainEntry]
-        - bpm: Optional[int] (None if BPM is not defined)
-        - sections: Dict[str, Tuple[int, int]]
-            Section name mapped to (start, end) indices
+        - chain: List[ChainEntry] (with .bars and .section restored when possible)
+        - bpm: Optional[int]
+        - sections: Dict[str, Tuple[int, int]]  # 0-based inclusive ranges
     """
     with open(path, "r", encoding="utf-8") as f:
         raw_lines = f.readlines()
@@ -96,15 +199,12 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
     sections: dict[str, tuple[int, int]] = {}
 
     for ln in lines:
-        # Section definition: "#SECTION <name> <start> <end>"
-        # Must be handled before generic '#' comments
-       
+        # Section definition: "#SECTION <name> <start> <end>" (ARR: 1-based)
         if ln.startswith("#SECTION"):
             parts = ln.split()
             if len(parts) >= 4:
                 _, name, s, e = parts[:4]
                 try:
-                    # ARR is 1-based, internal is 0-based (inclusive)
                     s0 = int(s) - 1
                     e0 = int(e) - 1
                     sections[name] = (s0, e0)
@@ -116,7 +216,7 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
         if ln.startswith("#"):
             continue
 
-        # BPM definition: "BPM=<value>"
+        # BPM definition
         if ln.upper().startswith("BPM="):
             try:
                 bpm = int(ln.split("=", 1)[1])
@@ -124,17 +224,17 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
                 bpm = None
             continue
 
-        # MAIN chain specification: "MAIN|..."
+        # MAIN chain specification
         if ln.upper().startswith("MAIN|"):
             main_spec = ln.split("|", 1)[1].strip()
             continue
 
-        # Optional bars selection line: "BARS|F,A,B"
+        # Optional bars selection line
         if ln.upper().startswith("BARS|"):
             bars_spec = ln.split("|", 1)[1].strip()
             continue
 
-        # Pool entry: "<number>=<filename>"
+        # Pool entry
         if "=" in ln and ln.split("=", 1)[0].isdigit():
             idx_str, fn = ln.split("=", 1)
             try:
@@ -145,11 +245,10 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
 
     chain: List[ChainEntry] = []
 
-    # Build the main chain from MAIN specification
+    # Build chain from MAIN
     if main_spec:
         parts = [p.strip() for p in main_spec.split(",") if p.strip()]
         for p in parts:
-            # Format: "3x4" (index x repeats) or "3" (single repeat)
             if "x" in p:
                 idx_str, rep_str = p.split("x", 1)
                 try:
@@ -167,11 +266,9 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
             fn = pool_map.get(idx)
             if not fn:
                 continue
-
             chain.append(ChainEntry(fn, rep))
 
-    # Apply optional BARS tokens (1:1 with MAIN entries).
-    # If BARS| is missing, default everything to F (backwards compatibility).
+    # Apply BARS tokens (1:1 with MAIN entries)
     toks: List[str] = []
     if bars_spec:
         toks = [t.strip().upper()[:1] for t in bars_spec.split(",") if t.strip()]
@@ -181,5 +278,8 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
         if t not in ("F", "A", "B"):
             t = "F"
         setattr(e, "bars", t)
+
+    # Apply SECTION metadata onto ChainEntry.section for UI friendliness
+    _apply_sections_to_chain(chain, sections)
 
     return chain, bpm, sections
