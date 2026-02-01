@@ -528,7 +528,7 @@ def stepseq_mode(
         except curses.error:
             pass
 
-        footer = "Move: arrows/h/j/k/l  Enter:toggle  J/K:vel  [ ]:bar  c:copy bar1->bar2  Space:play  w:save  q/Esc:exit"
+        footer = "Move: arrows/h/j/k/l  Enter:toggle  J/K:vel  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play  w:save  q/Esc:exit"
         try:
             stdscr.addnstr(max_y - 2, 1, footer.ljust(max_x - 2), max_x - 2)
         except curses.error:
@@ -664,7 +664,43 @@ def stepseq_mode(
                     lvl = 1
                 cell.vel = level_to_vel(lvl)
                 modified = True
-        elif key in (ord("c"), ord("C")):
+
+        # ------------------------------------------------------------
+        # StepSeq matrix edit (Shift+B/R/C)
+        # - Shift+B: clear current bar (page)
+        # - Shift+R: clear current row (instrument lane) within current bar
+        # - Shift+C: clear current column (step) within current bar
+        # NOTE: These are StepSeq-local keys.
+        # ------------------------------------------------------------
+        elif key == ord('B'):  # Shift+B: clear current bar
+            start = page * page_size
+            end = min(start + page_size, grid.steps)
+            for lane in grid.lanes:
+                for s in range(start, end):
+                    lane.cells[s].on = False
+                    lane.cells[s].vel = 0
+            modified = True
+
+        elif key == ord('R'):  # Shift+R: clear current row (lane) in current bar
+            start = page * page_size
+            end = min(start + page_size, grid.steps)
+            lane = grid.lanes[cur_lane]
+            for s in range(start, end):
+                lane.cells[s].on = False
+                lane.cells[s].vel = 0
+            modified = True
+
+        elif key == ord('C'):  # Shift+C: clear current column (step) in current bar
+            # Guard: only apply when cursor step is inside current bar page
+            start = page * page_size
+            end = min(start + page_size, grid.steps)
+            if start <= cur_step < end:
+                for lane in grid.lanes:
+                    lane.cells[cur_step].on = False
+                    lane.cells[cur_step].vel = 0
+                modified = True
+
+        elif key == ord("c"):
             # Copy bar1 -> bar2 (page_size steps) when bar2 exists
             if grid.steps >= 2 * page_size:
                 for lane in grid.lanes:
