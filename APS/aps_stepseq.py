@@ -23,6 +23,7 @@ APS_STEPSEQ_CHANGE_NOTE = 'StepSeq: cursor-only accent background, NC quit-witho
 # 편집이 끝나면 다시 grid에 반영해서 사용합니다.
 
 import curses
+import textwrap
 from dataclasses import dataclass, field
 from typing import List, Callable, Optional, Tuple
 
@@ -338,6 +339,9 @@ def stepseq_mode(
     page_size = int(getattr(meta, "steps_per_bar", 16) or 16)  # 12 / 16 / 24
     page = 0  # 0 = bar1, 1 = bar2
 
+    # Enter key will write notes using this accent level (1=SOFT, 2=MEDIUM, 3=STRONG)
+    enter_accent_level = 2
+
     # NOTE: max_y/max_x are queried inside draw() to stay stable across terminal resizes.
 
     # Dirty-state tracking: show '*' only when current grid differs from baseline (saved/original)
@@ -494,7 +498,7 @@ def stepseq_mode(
 
         # Velocity legend (symbol uses same accent background style; text stays normal)
         try:
-            y_leg = max_y - 4
+            y_leg = max_y - 5
             x = 2
             stdscr.addnstr(y_leg, x, "Legend: ", max_x - x)
             x += len("Legend: ")
@@ -519,20 +523,28 @@ def stepseq_mode(
                 x += len(" " + label + "  ")
 
             _draw_leg(".", P_CURSOR_REST, "REST")
-            _draw_leg("-", P_CURSOR_L1, "SOFT")
-            _draw_leg("X", P_CURSOR_L2, "MEDIUM")
-            _draw_leg("O", P_CURSOR_L3, "STRONG")
+            _draw_leg("-", P_CURSOR_L1, "SOFT"   + ("*" if enter_accent_level == 1 else ""))
+            _draw_leg("X", P_CURSOR_L2, "MEDIUM" + ("*" if enter_accent_level == 2 else ""))
+            _draw_leg("O", P_CURSOR_L3, "STRONG" + ("*" if enter_accent_level == 3 else ""))
         except curses.error:
             pass
 
         except curses.error:
             pass
 
-        footer = "Move: arrows/h/j/k/l  Enter:toggle  J/K:vel  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play  w:save  q/Esc:exit"
-        try:
-            stdscr.addnstr(max_y - 2, 1, footer.ljust(max_x - 2), max_x - 2)
-        except curses.error:
-            pass
+        footer = "Move: arrows/h/j/k/l  Enter:write accent / toggle off  A:accent  J/K:vel  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play  w:save  q/Esc:exit"
+        # Footer can be long; wrap it to the window width (2 lines reserved)
+        footer_y = max_y - 3
+        footer_w = max(1, max_x - 2)
+        lines = textwrap.wrap(footer, width=footer_w, break_long_words=False, break_on_hyphens=False)
+        for i in range(2):
+            if footer_y + i >= max_y - 1:
+                break
+            line = lines[i] if i < len(lines) else ""
+            try:
+                stdscr.addnstr(footer_y + i, 1, line.ljust(footer_w), footer_w)
+            except curses.error:
+                pass
 
         stdscr.refresh()
 
@@ -615,15 +627,26 @@ def stepseq_mode(
             if cur_step > end:
                 cur_step = end
 
-        elif key == ord("\n"):  # Space / Enter
+        elif key == ord("\n"):  # Enter
             cell = grid.lanes[cur_lane].cells[cur_step]
             if cell.on:
+                # Enter toggles OFF when a note already exists
                 cell.on = False
+                cell.vel = 0
             else:
+                # Enter writes a note using the current input accent (SOFT/MEDIUM/STRONG)
                 cell.on = True
-                if cell.vel <= 0:
-                    cell.vel = 88
+                cell.vel = level_to_vel(enter_accent_level)
             modified = True
+
+        elif key in (ord('a'), ('A')):  # Shift+A: cycle Enter input accent (SOFT -> MEDIUM -> STRONG)
+            if enter_accent_level == 1:
+                enter_accent_level = 2
+            elif enter_accent_level == 2:
+                enter_accent_level = 3
+            else:
+                enter_accent_level = 1
+            # No data modified yet; just UI state
         elif key == ord('K'):  # Shift+K: stronger (vim-style, non-cycling)
             cell = grid.lanes[cur_lane].cells[cur_step]
             if cell.on:
