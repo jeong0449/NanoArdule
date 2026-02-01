@@ -2666,6 +2666,7 @@ bpm=bpm,
                     if not chain:
                         chain.append(ChainEntry(fn, 1))
                         chain_selected_idx = 0
+
                     else:
                         if chain_selected_idx < 0 or chain_selected_idx >= len(chain):
                             chain_selected_idx = len(chain) - 1
@@ -2718,8 +2719,8 @@ bpm=bpm,
                             if not chain:
                                 chain = block
                                 chain_selected_idx = 0
-                                # Apply imported ARR sections for a fresh chain
-                                section_mgr.import_sections_from_source(arr_sections, 0, prefix="i_")
+                                # Fresh workspace: keep original section names (no i_ prefix)
+                                section_mgr.sections = dict(arr_sections or {})
                                 _sync_chain_section_labels_from_mgr()
                             else:
                                 if (
@@ -2753,6 +2754,7 @@ bpm=bpm,
                     if not chain:
                         chain.append(ChainEntry(fn, 1))
                         chain_selected_idx = 0
+
                     else:
                         if chain_selected_idx < 0 or chain_selected_idx >= len(chain):
                             chain_selected_idx = len(chain) - 1
@@ -2802,8 +2804,8 @@ bpm=bpm,
                             if not chain:
                                 chain = block
                                 chain_selected_idx = 0
-                                # Apply imported ARR sections for a fresh chain
-                                section_mgr.import_sections_from_source(arr_sections, 0, prefix="i_")
+                                # Fresh workspace: keep original section names (no i_ prefix)
+                                section_mgr.sections = dict(arr_sections or {})
                                 _sync_chain_section_labels_from_mgr()
                             else:
                                 if (
