@@ -11,7 +11,7 @@
 
 APS_MAIN_BUILD_DATE_KST = "2025-12-17"
 APS_MAIN_BUILD_TAG = "aps_main-20251217"
-APS_MAIN_CHANGE_NOTE = 'Unified main: NC dialogs, warnings, ARR #COUNTIN, shared MIDI out_port, color re-init. | ARR MAIN expanded (no xN) & BARS 1:1'
+APS_MAIN_CHANGE_NOTE = 'Unified main: NC dialogs, warnings, ARR #COUNTIN, shared MIDI out_port, color re-init.'
 
 
 def write_adt_file_v22a(path: str, pat):
@@ -376,25 +376,6 @@ def main_curses(stdscr):
         if 0 <= countin_idx < len(countin_presets):
             return countin_presets[countin_idx].name
         return "?"
-
-
-    def _expand_chain_for_arr(src_chain: List[ChainEntry]) -> List[ChainEntry]:
-        """Expand repeats so ARR MAIN/BARS are always 1:1 and MAIN uses no xN tokens."""
-        out: List[ChainEntry] = []
-        for e in (src_chain or []):
-            fn = getattr(e, "filename", "")
-            rep = int(getattr(e, "repeats", 1) or 1)
-            rep = max(1, rep)
-
-            bars = str(getattr(e, "bars", "F") or "F").upper()[:1]
-            sec = getattr(e, "section", None)
-
-            for _ in range(rep):
-                ne = ChainEntry(fn, 1)  # repeats flattened
-                setattr(ne, "bars", bars)
-                setattr(ne, "section", sec)
-                out.append(ne)
-        return out
 
     def push_undo():
         # Save current state onto the stack with a deep copy
@@ -1951,8 +1932,7 @@ bpm=bpm,
                 section_lines: List[str] = []
                 cur_sec = None
                 sec_start = 1
-                chain_expanded = _expand_chain_for_arr(chain)
-                for i, e in enumerate(chain_expanded, start=1):
+                for i, e in enumerate(chain, start=1):
                     sec = getattr(e, "section", None)
                     if sec != cur_sec:
                         if cur_sec:
@@ -1966,30 +1946,38 @@ bpm=bpm,
                 pool: List[str] = []
                 pool_map: dict[str, int] = {}
                 seq_tokens: List[str] = []
-                for e in chain_expanded:
+
+                for e in chain:
                     fn = getattr(e, "filename", "")
+                    rep = int(getattr(e, "repeats", 1) or 1)
                     if fn not in pool_map:
                         pool.append(fn)
                         pool_map[fn] = len(pool)
                     idx = pool_map[fn]
-                    seq_tokens.append(str(idx))
+                    if rep > 1:
+                        seq_tokens.append(f"{idx}x{rep}")
+                    else:
+                        seq_tokens.append(str(idx))
 
-                # Derive #PLAY (informational; optional)
-                # Spec note (ARR v0.05.x): repeat-count semantics are not supported in #PLAY.
+                # Derive #PLAY (informational; sections + bare patterns)
                 play_lines: List[str] = []
                 last_sec = None
-                for e in chain_expanded:
+                in_section = False
+                for e in chain:
                     sec = getattr(e, "section", None)
                     if sec:
                         if sec != last_sec:
-                            play_lines.append(str(sec))
+                            play_lines.append(sec)
                             last_sec = sec
-                        continue
-
-                    last_sec = None
-                    idx = pool_map.get(getattr(e, "filename", ""), None)
-                    if idx is not None:
-                        play_lines.append(f"{idx}")
+                        in_section = True
+                    else:
+                        # If a section label is present, do not emit per-pattern indices for that section in #PLAY.
+                        if not in_section:
+                            idx = pool_map.get(getattr(e, "filename", ""), None)
+                            rep = int(getattr(e, "repeats", 1) or 1)
+                            if idx is not None:
+                                play_lines.append(f"{idx}x{rep}" if rep > 1 else f"{idx}")
+                        last_sec = None
 
                 out_lines: List[str] = []
                 out_lines.extend(header_lines)
@@ -2009,7 +1997,7 @@ bpm=bpm,
                 out_lines.append("MAIN|" + ",".join(seq_tokens))
 
                 # Optional BARS line (1:1 with MAIN entries). Default is F.
-                bars_tokens = [str(getattr(e, "bars", "F") or "F").upper()[:1] for e in chain_expanded]
+                bars_tokens = [str(getattr(e, "bars", "F") or "F").upper()[:1] for e in chain]
                 if any(t in ("A", "B") for t in bars_tokens):
                     out_lines.append("BARS|" + ",".join(bars_tokens))
 
@@ -2119,7 +2107,6 @@ bpm=bpm,
                 for e in chain:
                     ne = ChainEntry(e.filename, e.repeats)
                     setattr(ne, "bars", str(getattr(e, "bars", "F") or "F").upper()[:1])
-                    setattr(ne, "section", getattr(e, "section", None))
                     chain_for_save.append(ne)
                 had_adp = False
                 for e in chain_for_save:
@@ -2128,9 +2115,8 @@ bpm=bpm,
                         b0, _ext0 = os.path.splitext(e.filename)
                         e.filename = b0 + ".ADT"
 
-                # First, write the base ARR (MAIN is always expanded; no xN)
-                chain_expanded = _expand_chain_for_arr(chain_for_save)
-                save_arr(path, chain_expanded, bpm)
+                # First, write the base ARR
+                save_arr(path, chain_for_save, bpm)
 
                 # Then insert #COUNTIN / #SECTION headers to record state
                 try:
@@ -2163,7 +2149,7 @@ bpm=bpm,
                     section_blocks = []
                     cur_sec = None
                     sec_start = 0
-                    for i, e in enumerate(chain_expanded):
+                    for i, e in enumerate(chain):
                         sec = getattr(e, "section", None)
                         if sec != cur_sec:
                             if cur_sec:
@@ -2171,7 +2157,7 @@ bpm=bpm,
                             cur_sec = sec
                             sec_start = i
                     if cur_sec:
-                        section_blocks.append((cur_sec, sec_start, len(chain_expanded) - 1))
+                        section_blocks.append((cur_sec, sec_start, len(chain) - 1))
 
                     # Build a filename -> pool index map from the saved body (preferred),
                     # falling back to the in-memory chain order.
@@ -2198,7 +2184,7 @@ bpm=bpm,
                     play_lines: List[str] = []
                     last_sec = None
                     in_section = False
-                    for e in chain_expanded:
+                    for e in chain:
                         sec = getattr(e, "section", None)
                         if sec:
                             if sec != last_sec:
@@ -2217,7 +2203,7 @@ bpm=bpm,
                         rep = int(getattr(e, "repeats", 1) or 1)
                         if idx is None:
                             continue
-                        play_lines.append(f"{idx}")
+                        play_lines.append(f"{idx}x{rep}" if rep > 1 else f"{idx}")
                     with open(path, "w", encoding="utf-8") as f:
                         f.write(header + "\n")
                         for sec, s2, e2 in section_blocks:
@@ -2302,8 +2288,69 @@ bpm=bpm,
                 msg = "Clipboard cleared"
                 continue
 
-            # When chain window has focus, Enter does not insert a pattern
-            if ch in (10, 13):  # Enter
+            # Chain focus: Enter opens StepSeq for the highlighted chain entry (with confirmation).
+            if ch in (10, 13, curses.KEY_ENTER, 343, 459):
+                if not chain or not (0 <= chain_selected_idx < len(chain)):
+                    msg = "No chain entry selected"
+                    continue
+
+                fn = getattr(chain[chain_selected_idx], "filename", "") or ""
+                # Normalize ADP -> ADT (StepSeq edits ADT).
+                if fn.lower().endswith(".adp"):
+                    fn = fn[:-4] + ".adt"
+
+                # Find the pattern in the current PAT list first; fallback to the full PAT list if filtered.
+                target = fn.lower()
+                idx = None
+                if list_mode == "patterns" and pattern_files:
+                    for i, f in enumerate(pattern_files):
+                        if str(f).lower() == target:
+                            idx = i
+                            break
+                if idx is None:
+                    for i, f in enumerate(pattern_all or []):
+                        if str(f).lower() == target:
+                            idx = i
+                            break
+
+                if idx is None:
+                    msg = f"StepSeq: pattern not found: {fn}"
+                    continue
+
+                ok = dialog_confirm(
+                    stdscr,
+                    f"Open StepSeq for:\n\n{fn}\n",
+                    yes_label="OK",
+                    no_label="Cancel",
+                    default_yes=True,
+                )
+                if not ok:
+                    continue
+
+                # Jump into StepSeq using the existing entry path.
+                prev_focus = focus
+                prev_list_mode = list_mode
+                prev_selected = selected_idx
+                prev_top = top_index
+                prev_pattern_files = pattern_files
+                prev_active_genre = active_genre
+                try:
+                    # Ensure StepSeq has a stable PAT list/index context.
+                    list_mode = "patterns"
+                    active_genre = "ALL"
+                    pattern_files = list(pattern_all or [])
+                    selected_idx = idx
+                    top_index = max(0, selected_idx - max(1, inner * 2) + 1)
+                    open_stepseq_for_selected_pattern()
+                    load_preview()
+                finally:
+                    focus = prev_focus
+                    list_mode = prev_list_mode
+                    selected_idx = prev_selected
+                    top_index = prev_top
+                    pattern_files = prev_pattern_files
+                    active_genre = prev_active_genre
+
                 continue
 
             rng = selection.get_range()
