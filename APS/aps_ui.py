@@ -273,6 +273,8 @@ def draw_chain_view(
     selection: ChainSelection,
     section_mgr: SectionManager,
     countin_label: str,
+    top_index: int = 0,
+    view_rows: Optional[int] = None,
 ):
     """
     Chain view:
@@ -308,10 +310,27 @@ def draw_chain_view(
         win.refresh()
         return
 
+    # --- Visible rows (defensive): allow caller to specify view_rows ---
     max_rows = h - 2
+    if view_rows is not None:
+        max_rows = max(1, min(max_rows, int(view_rows)))
+
+    # --- Start row: prefer caller-provided top_index, but keep cursor visible as a safety net ---
     start = 0
-    if selected_idx >= max_rows:
-        start = selected_idx - max_rows + 1
+    if chain:
+        start = max(0, min(int(top_index), len(chain) - 1))
+
+        # Ensure selected cursor is visible even if caller forgot to update top_index
+        if selected_idx < start:
+            start = selected_idx
+        elif selected_idx >= start + max_rows:
+            start = selected_idx - max_rows + 1
+
+        # Final clamp
+        if start < 0:
+            start = 0
+        if start > len(chain) - 1:
+            start = len(chain) - 1
 
     sel_range = selection.get_range()
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import os
+import re
 from typing import List, Tuple, Optional, Dict
 from aps_core import ChainEntry
 
@@ -135,7 +136,13 @@ def save_arr(path: str, chain: List[ChainEntry], bpm: int) -> None:
         i = idx_map[entry.filename]
         rep = int(getattr(entry, "repeats", 1) or 1)
         if rep > 1:
-            seq_parts.append(f"{i}x{rep}")
+
+            # Expand repeats so MAIN| never contains xN (or XN).
+            try:
+                n = max(1, int(rep))
+            except Exception:
+                n = 1
+            seq_parts.extend([str(i)] * n)
         else:
             seq_parts.append(str(i))
     main_line = "MAIN|" + ",".join(seq_parts)
@@ -249,11 +256,11 @@ def parse_arr(path: str) -> Tuple[List[ChainEntry], Optional[int], dict]:
     if main_spec:
         parts = [p.strip() for p in main_spec.split(",") if p.strip()]
         for p in parts:
-            if "x" in p:
-                idx_str, rep_str = p.split("x", 1)
+            m = re.match(r"^(\d+)\s*[xX]\s*(\d+)$", p)
+            if m:
                 try:
-                    idx = int(idx_str)
-                    rep = int(rep_str)
+                    idx = int(m.group(1))
+                    rep = int(m.group(2))
                 except ValueError:
                     continue
             else:

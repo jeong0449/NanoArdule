@@ -306,6 +306,7 @@ def main_curses(stdscr):
 
     chain: List[ChainEntry] = []
     chain_selected_idx = 0  # Chain cursor (insertion position)
+    chain_top_index = 0     # Chain scroll top (first visible row)
     focus = "patterns"  # "patterns" or "chain"
     bpm = 120
     repeat_mode = False
@@ -1075,6 +1076,37 @@ bpm=bpm,
     # (초기 상태에서 그리드가 비어 보이는 문제 방지)
     if list_mode == "patterns" and pattern_files:
         load_preview()
+    # --- Helper: adjust scroll so the selected index is visible ---
+    def ensure_visible(total_len: int):
+        nonlocal top_index, selected_idx, inner
+        if inner <= 0 or total_len <= 0:
+            top_index = 0
+            return
+        visible_cap = inner * 2
+        if selected_idx < top_index:
+            top_index = selected_idx
+        elif selected_idx >= top_index + visible_cap:
+            top_index = selected_idx - visible_cap + 1
+        max_top_local = max(0, total_len - 1)
+        if top_index > max_top_local:
+            top_index = max_top_local
+        if top_index < 0:
+            top_index = 0
+
+    def chain_ensure_visible(total_len: int, view_rows: int):
+        nonlocal chain_top_index, chain_selected_idx
+        if view_rows <= 0 or total_len <= 0:
+            chain_top_index = 0
+            return
+        if chain_selected_idx < chain_top_index:
+            chain_top_index = chain_selected_idx
+        elif chain_selected_idx >= chain_top_index + view_rows:
+            chain_top_index = chain_selected_idx - view_rows + 1
+        max_top_local = max(0, total_len - 1)
+        if chain_top_index > max_top_local:
+            chain_top_index = max_top_local
+        if chain_top_index < 0:
+            chain_top_index = 0
 
     while True:
         if handle_terminal_resize():
@@ -1385,6 +1417,9 @@ bpm=bpm,
         chain_win = stdscr.derwin(
             chain_h, right_w, work_top + grid_h, list_w + 1
         )
+        _chain_h, _chain_w = chain_win.getmaxyx()
+        chain_view_rows = max(1, _chain_h - 2)  # header/footer 고려(대부분 -2)
+
         draw_chain_view(
             chain_win,
             chain,
@@ -1394,6 +1429,8 @@ bpm=bpm,
             selection,
             section_mgr,
             get_countin_label(),
+            chain_top_index,
+            chain_view_rows,
         )
 
 #        stdscr.refresh()
@@ -1404,25 +1441,6 @@ bpm=bpm,
             if handle_terminal_resize(force=True):
                 continue
 
-
-
-
-        # --- Helper: adjust scroll so the selected index is visible ---
-        def ensure_visible(total_len: int):
-            nonlocal top_index, selected_idx, inner
-            if inner <= 0 or total_len <= 0:
-                top_index = 0
-                return
-            visible_cap = inner * 2
-            if selected_idx < top_index:
-                top_index = selected_idx
-            elif selected_idx >= top_index + visible_cap:
-                top_index = selected_idx - visible_cap + 1
-            max_top_local = max(0, total_len - 1)
-            if top_index > max_top_local:
-                top_index = max_top_local
-            if top_index < 0:
-                top_index = 0
 
         # --- Helper: show multi-line text in a centered reverse-video popup ---
         def show_text_popup(lines_to_show: List[str], title: str = "Info"):
@@ -1954,10 +1972,11 @@ bpm=bpm,
                         pool.append(fn)
                         pool_map[fn] = len(pool)
                     idx = pool_map[fn]
-                    if rep > 1:
-                        seq_tokens.append(f"{idx}x{rep}")
-                    else:
-                        seq_tokens.append(str(idx))
+                    try:
+                        n = max(1, int(rep))
+                    except Exception:
+                        n = 1
+                    seq_tokens.extend([str(idx)] * n)
 
                 # Derive #PLAY (informational; sections + bare patterns)
                 play_lines: List[str] = []
@@ -1997,7 +2016,15 @@ bpm=bpm,
                 out_lines.append("MAIN|" + ",".join(seq_tokens))
 
                 # Optional BARS line (1:1 with MAIN entries). Default is F.
-                bars_tokens = [str(getattr(e, "bars", "F") or "F").upper()[:1] for e in chain]
+                bars_tokens: List[str] = []
+                for e in chain:
+                    b = str(getattr(e, "bars", "F") or "F").upper()[:1]
+                    rep = int(getattr(e, "repeats", 1) or 1)
+                    try:
+                        n = max(1, int(rep))
+                    except Exception:
+                        n = 1
+                    bars_tokens.extend([b] * n)
                 if any(t in ("A", "B") for t in bars_tokens):
                     out_lines.append("BARS|" + ",".join(bars_tokens))
 
@@ -2486,6 +2513,7 @@ bpm=bpm,
                 selected_idx,
                 push_undo,
             )
+            chain_ensure_visible(len(chain), chain_view_rows)
             # ------------------------------------------------------------
             # CHAIN_UI_REQUEST handling (from aps_chainedit)
             # - Important: section edit modifies section_mgr metadata only.
