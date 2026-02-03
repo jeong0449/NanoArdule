@@ -1,6 +1,6 @@
 # APS Key Map (Ardule Pattern Studio)
 
-Last update: **2026-01-06**
+Last update: **2026-02-03**
 
 ---
 
@@ -86,6 +86,15 @@ Notes:
 - `S` opens a prompt to enter or select a section name.
 - `R` removes the section label at the current chain position.
 - In non-Chain focus, `R` keeps its original meaning.
+
+
+---
+
+## Chain Edit – Pattern Editing
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Open StepSeq for the pattern at cursor |
 
 ---
 
