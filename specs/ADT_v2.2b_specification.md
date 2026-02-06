@@ -22,6 +22,27 @@ The playback engine continues to rely solely on `LENGTH` and `GRID`.
 `TIME_SIG` is elevated from a purely informational hint to a **formally defined
 musical metadata field**, usable for validation and editor behavior.
 
+### Slot Semantics (Non-fixed Instruments)
+
+ADT patterns consist of a fixed number of **slots (rows)**.
+In ADT v2.x, a pattern provides **up to 12 independent rhythmic slots**.
+
+These slots do **not** represent fixed or predefined instruments.
+ADT intentionally does not mandate any specific instrument assignment
+(e.g., Kick, Snare, Hi-Hat, Percussion).
+
+Instead, each slot represents an **independent rhythmic role** that may be
+mapped to any MIDI note as required by the user, editor, or playback context.
+
+Instrument identity is therefore:
+- external to the ADT specification
+- defined by higher-level conventions (e.g., editor templates, user presets)
+- flexible across musical styles and performance systems
+
+In other words:
+
+> **ADT defines 12 rhythmic roles, not 12 fixed instruments.**
+
 ---
 
 ## 1. Header Fields
