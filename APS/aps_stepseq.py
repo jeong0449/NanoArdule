@@ -642,7 +642,7 @@ def stepseq_mode(
             else:
                 enter_accent_level = 1
             # No data modified yet; just UI state
-        elif key == ord('K'):  # Shift+K: stronger (vim-style, non-cycling)
+        elif key in (ord('K'), ord('.')):  # Shift+K: stronger (vim-style, non-cycling)
             cell = grid.lanes[cur_lane].cells[cur_step]
             if cell.on:
                 lvl = vel_to_level(cell.vel)
@@ -651,8 +651,7 @@ def stepseq_mode(
                 lvl = _adjust_level_1_3(lvl, +1)
                 cell.vel = level_to_vel(lvl)
                 modified = True
-
-        elif key == ord('J'):  # Shift+J: weaker (vim-style, non-cycling)
+        elif key in (ord('J'), ord(',')):  # Shift+J: weaker (vim-style, non-cycling)
             cell = grid.lanes[cur_lane].cells[cur_step]
             if cell.on:
                 lvl = vel_to_level(cell.vel)
