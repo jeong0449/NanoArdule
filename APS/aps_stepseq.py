@@ -492,8 +492,6 @@ def stepseq_mode(
                 except curses.error:
                     pass
 
-                except curses.error:
-                    pass
                 col += 3
 
         # Velocity legend (symbol uses same accent background style; text stays normal)
@@ -526,9 +524,6 @@ def stepseq_mode(
             _draw_leg("-", P_CURSOR_L1, "SOFT"   + ("*" if enter_accent_level == 1 else ""))
             _draw_leg("X", P_CURSOR_L2, "MEDIUM" + ("*" if enter_accent_level == 2 else ""))
             _draw_leg("O", P_CURSOR_L3, "STRONG" + ("*" if enter_accent_level == 3 else ""))
-        except curses.error:
-            pass
-
         except curses.error:
             pass
 
@@ -639,7 +634,7 @@ def stepseq_mode(
                 cell.vel = level_to_vel(enter_accent_level)
             modified = True
 
-        elif key in (ord('a'), ('A')):  # Shift+A: cycle Enter input accent (SOFT -> MEDIUM -> STRONG)
+        elif key in (ord('a'), ord('A')):  # Shift+A: cycle Enter input accent (SOFT -> MEDIUM -> STRONG)
             if enter_accent_level == 1:
                 enter_accent_level = 2
             elif enter_accent_level == 2:
