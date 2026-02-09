@@ -994,6 +994,128 @@ bpm=bpm,
         except Exception:
             pass
 
+        # ------------------------------------------------------------
+        # [MVP-1 EXT NOTE COMMIT] absorb out-of-slot notes into 12 slots
+        # by slot reassignment (editor-side) before applying events.
+        # ------------------------------------------------------------
+        CORE_ABBR = {"KK", "SN", "CH", "OH"}
+
+        # Reference map (note -> (abbr, name<=6))
+        REF = {
+            36: ("KK", "KICK"),
+            38: ("SN", "SNARE"),
+            42: ("CH", "HH_CL"),
+            46: ("OH", "HH_OP"),
+            47: ("MT", "TOM_M"),
+            45: ("LT", "TOM_L"),
+            50: ("HT", "TOM_H"),
+            49: ("CR", "CRASH"),
+            51: ("RD", "RIDE"),
+            39: ("CL", "CLAP"),
+            54: ("TA", "TAMB"),
+            56: ("CB", "COWBL"),
+            37: ("RM", "RIM"),
+            82: ("SH", "SHAKR"),
+            76: ("HW", "WBLK_H"),
+            55: ("SP", "SPLASH"),
+            44: ("PH", "HH_PED"),
+        }
+
+        def _slot_is_empty(slot_idx: int) -> bool:
+            # empty = all steps are 0 at this slot
+            for s in range(max_step):
+                row = pat.grid[s]
+                if 0 <= slot_idx < len(row) and int(row[slot_idx]) != 0:
+                    return False
+            return True
+
+        def _slot_abbr(i: int) -> str:
+            try:
+                if hasattr(pat, "slot_abbr") and i < len(pat.slot_abbr):
+                    return str(pat.slot_abbr[i] or "")
+            except Exception:
+                pass
+            return ""
+
+        def _ensure_slot_arrays():
+            # make sure slot_abbr/slot_note/slot_name exist and have length=slots
+            slots_local = int(getattr(pat, "slots", 12) or 12)
+            if not hasattr(pat, "slot_abbr") or pat.slot_abbr is None:
+                pat.slot_abbr = [""] * slots_local
+            if not hasattr(pat, "slot_note") or pat.slot_note is None:
+                pat.slot_note = [0] * slots_local
+            if not hasattr(pat, "slot_name") or pat.slot_name is None:
+                pat.slot_name = [""] * slots_local
+            # normalize lengths
+            if len(pat.slot_abbr) < slots_local:
+                pat.slot_abbr += [""] * (slots_local - len(pat.slot_abbr))
+            if len(pat.slot_note) < slots_local:
+                pat.slot_note += [0] * (slots_local - len(pat.slot_note))
+            if len(pat.slot_name) < slots_local:
+                pat.slot_name += [""] * (slots_local - len(pat.slot_name))
+
+        def _assign_slot(slot_idx: int, note: int):
+            abbr, nm = REF.get(int(note), (f"N{int(note)}", f"NOTE{int(note)}"))
+            pat.slot_note[slot_idx] = int(note)
+            pat.slot_abbr[slot_idx] = abbr
+            pat.slot_name[slot_idx] = nm
+
+        # Collect notes that appear in new_events
+        new_notes = []
+        for de in new_events:
+            if getattr(de, "type", "") == "on" and getattr(de, "chan", None) == meta.channel:
+                try:
+                    nn = int(getattr(de, "note", 0))
+                except Exception:
+                    continue
+                if nn > 0:
+                    new_notes.append(nn)
+
+        new_notes = sorted(set(new_notes))
+
+        # Allocate slots for notes that are not in note_to_slot yet
+        if new_notes:
+            _ensure_slot_arrays()
+            slots_local = int(getattr(pat, "slots", 12) or 12)
+
+            rejected_notes = []
+
+            for nn in new_notes:
+                if nn in note_to_slot:
+                    continue
+
+                # Find a replaceable empty slot (not core, empty grid)
+                target = None
+                for si in range(slots_local):
+                    ab = _slot_abbr(si)
+                    if ab in CORE_ABBR:
+                        continue
+                    if _slot_is_empty(si):
+                        target = si
+                        break
+
+                if target is None:
+                    # Policy: do NOT steal a non-empty/non-core slot.
+                    # If there is no empty, reassignable slot available, reject this note.
+                    rejected_notes.append(nn)
+                    continue
+
+                # If this slot had an old note mapping, remove it
+                try:
+                    old_note = int(pat.slot_note[target])
+                except Exception:
+                    old_note = None
+                if old_note is not None and old_note in note_to_slot:
+                    del note_to_slot[old_note]
+
+                _assign_slot(target, nn)
+                note_to_slot[nn] = target
+
+
+
+            if rejected_notes:
+                msg = "StepSeq: NO EMPTY SLOT for NOTE(s): " + ",".join(str(x) for x in rejected_notes)
+
         # 9) If nothing changed and nothing was saved, exit as-is
         if (not modified) and (not saved):
             msg = "StepSeq: no changes"
