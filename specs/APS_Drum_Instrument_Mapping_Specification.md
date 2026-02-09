@@ -84,7 +84,7 @@ The **MPK MINI Pad 16 Set** defines a reference physical mapping for 4×4 pad co
 |                    | LT (41) TOM_L  | O             | O              | O               | Upper_1C     |
 |                    | HT (48) TOM_H  | O             | O              | O               | Upper_2D     |
 |                    | CR (49) CRASH  | O             | O              | O               | Upper_1A     |
-|                    | RD (56) RIDE   | O             | O              | O               | Upper_1D     |
+|                    | RD (52) RIDE   | O             | O              | O               | Upper_1D     |
 | Rhythmic Perc      | CL (39) CLAP   | O             | O              | O               | Upper_2A     |
 |                    | TA (54) TAMB   |               | O              | O               | Upper_2B     |
 |                    | CB (56) COWBL  |               | O              | O               | Upper_2C     |
