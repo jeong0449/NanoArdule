@@ -43,6 +43,27 @@ In other words:
 
 > **ADT defines 12 rhythmic roles, not 12 fixed instruments.**
 
+### Slot Reassignment by Editors (Non-normative)
+
+While the ADT format defines a fixed number of slots per pattern (typically 12),
+the specification does not impose immutability on individual slot definitions.
+
+An editor implementation may reassign a slot’s MIDI note mapping
+(`SLOTn=CODE@NOTE,LABEL`) during pattern editing, provided that:
+
+- The total number of slots remains unchanged.
+- Slot reassignment does not violate the structural integrity of the pattern body.
+- Reassignment is applied only to slots that contain no note events
+  across the entire pattern.
+
+Such reassignment is an **editor-level behavior**, not a file-format requirement.
+Slots commonly regarded as *core instruments* (e.g., Kick, Snare, Closed Hi-Hat,
+Open Hi-Hat) may be protected from reassignment by editor policy.
+
+As a result, different ADT files — or the same ADT file at different points
+in its editing history — may legitimately define different MIDI note mappings
+for their slots, while remaining fully compliant with this specification.
+
 ---
 
 ## 1. Header Fields
