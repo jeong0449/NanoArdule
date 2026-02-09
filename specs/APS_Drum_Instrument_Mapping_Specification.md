@@ -80,11 +80,11 @@ The **MPK MINI Pad 16 Set** defines a reference physical mapping for 4×4 pad co
 |                    | SN (38) SNARE  | O             | O              | O               | Core         |
 |                    | CH (42) HH_CL  | O             | O              | O               | Core         |
 |                    | OH (46) HH_OP  | O             | O              | O               | Core         |
-| Fills / Transition | MT (45) TOM_M  | O             | O              | O               | Upper_1B     |
-|                    | LT (41) TOM_L  | O             | O              | O               | Upper_1C     |
-|                    | HT (48) TOM_H  | O             | O              | O               | Upper_2D     |
+| Fills / Transition | MT (47) TOM_M  | O             | O              | O               | Upper_1B     |
+|                    | LT (45) TOM_L  | O             | O              | O               | Upper_1C     |
+|                    | HT (50) TOM_H  | O             | O              | O               | Upper_2D     |
 |                    | CR (49) CRASH  | O             | O              | O               | Upper_1A     |
-|                    | RD (52) RIDE   | O             | O              | O               | Upper_1D     |
+|                    | RD (51) RIDE   | O             | O              | O               | Upper_1D     |
 | Rhythmic Perc      | CL (39) CLAP   | O             | O              | O               | Upper_2A     |
 |                    | TA (54) TAMB   |               | O              | O               | Upper_2B     |
 |                    | CB (56) COWBL  |               | O              | O               | Upper_2C     |
