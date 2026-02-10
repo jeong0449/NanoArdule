@@ -26,6 +26,15 @@ import curses
 import textwrap
 from dataclasses import dataclass, field
 from typing import List, Callable, Optional, Tuple
+import os
+import time
+
+# Optional dependency (for StepSeq live pad input)
+try:
+    import mido
+except Exception:
+    mido = None
+
 
 
 
@@ -264,6 +273,194 @@ def _apply_stepgrid_to_events(
 
 
 # ----------------------------------------------------------------------
+# MIDI live input helpers (StepSeq-local, non-blocking poll)
+# ----------------------------------------------------------------------
+
+def _open_stepseq_midi_input():
+    """
+    Try to open a MIDI input port for StepSeq live pad input.
+
+    Selection priority:
+      1) If env APS_STEPSEQ_MIDI_IN is set: pick the first port containing that substring (case-insensitive)
+      2) If a port contains 'MPK' or 'AKAI': pick it
+      3) Fallback: first available port
+    """
+    if mido is None:
+        return None
+    try:
+        names = list(mido.get_input_names())
+    except Exception:
+        names = []
+    if not names:
+        return None
+
+    want = (os.environ.get("APS_STEPSEQ_MIDI_IN") or "").strip()
+    pick = None
+
+    if want:
+        w = want.lower()
+        for n in names:
+            if w in n.lower():
+                pick = n
+                break
+
+    if pick is None:
+        for n in names:
+            ln = n.lower()
+            if ("mpk" in ln) or ("akai" in ln):
+                pick = n
+                break
+
+    if pick is None:
+        pick = names[0]
+
+    try:
+        return mido.open_input(pick)
+    except Exception:
+        return None
+
+
+
+# ----------------------------------------------------------------------
+# MIDI input presence heuristic (pad/controller attached?)
+# ----------------------------------------------------------------------
+
+def _detect_stepseq_pad_present(input_names: Optional[List[str]] = None) -> bool:
+    """
+    Heuristic: determine whether an external pad/controller is present.
+
+    Rationale (MVP-1):
+      - When a pad/controller is connected, StepSeq should NOT auto-open GS Wavetable.
+      - When no external input exists (keyboard-only StepSeq), keep legacy GS-friendly behavior.
+    """
+    if mido is None:
+        return False
+    try:
+        names = list(input_names) if input_names is not None else list(mido.get_input_names())
+    except Exception:
+        names = []
+    if not names:
+        return False
+
+    # If user explicitly selected a MIDI IN port, assume an external device is intended.
+    if (os.environ.get("APS_STEPSEQ_MIDI_IN") or "").strip():
+        return True
+
+    # Common substrings for pads/controllers (keep it simple & robust)
+    KEYWORDS = (
+        "mpk", "akai", "pad", "controller", "launchpad", "maschine", "apc",
+        "drum", "beat", "keylab", "oxygen", "novation", "arturia"
+    )
+    for n in names:
+        ln = (n or "").lower()
+        if any(k in ln for k in KEYWORDS):
+            return True
+    return False
+
+# ----------------------------------------------------------------------
+# MIDI live output helpers (optional, for audition / preview)
+# ----------------------------------------------------------------------
+
+def _open_stepseq_midi_output(pad_present: bool = False):
+    """
+    Try to open a MIDI output port for StepSeq audition / preview and StepSeq-local playback.
+
+    Policy (MVP-1):
+      - If a pad/controller is present (pad_present=True):
+          * Never auto-open "Microsoft GS Wavetable Synth".
+          * Use only APS_STEPSEQ_MIDI_OUT if provided; otherwise, keep output disabled (None).
+      - If no external input is present (pad_present=False, keyboard-only StepSeq):
+          * If APS_STEPSEQ_MIDI_OUT is provided: use it.
+          * Otherwise: allow GS Wavetable as a convenience default (legacy behavior).
+
+    Notes:
+      - StepSeq must keep working without MIDI OUT (preview/playback become silent).
+      - We intentionally avoid "best guess" auto-selection when a pad is present to
+        prevent noisy WinMM backend errors on Windows.
+    """
+    if mido is None:
+        return None
+    try:
+        names = list(mido.get_output_names())
+    except Exception:
+        names = []
+    if not names:
+        return None
+
+    want = (os.environ.get("APS_STEPSEQ_MIDI_OUT") or "").strip()
+    pick = None
+
+    def _is_gs_wavetable(port_name: str) -> bool:
+        ln = (port_name or "").lower()
+        return ("microsoft gs" in ln) or ("wavetable" in ln)
+
+    # 1) Explicit env selection always wins (substring match)
+    if want:
+        w = want.lower()
+        for n in names:
+            if w in (n or "").lower():
+                pick = n
+                break
+        if pick is None:
+            # If explicitly requested but not found, keep silent.
+            return None
+
+    # 2) No env selection: choose according to pad_present policy
+    if pick is None:
+        if pad_present:
+            return None  # do not auto-open anything when a pad/controller is present
+        # keyboard-only: allow GS as a reasonable default if available
+        for n in names:
+            if _is_gs_wavetable(n):
+                pick = n
+                break
+        if pick is None:
+            return None
+
+    try:
+        return mido.open_output(pick)
+    except Exception:
+        # Some backends print noisy WinMM errors even if we catch exceptions.
+        # Treat as "no output" and keep StepSeq running.
+        return None
+    try:
+        names = list(mido.get_output_names())
+    except Exception:
+        names = []
+    if not names:
+        return None
+
+    want = (os.environ.get("APS_STEPSEQ_MIDI_OUT") or "").strip()
+    pick = None
+
+    # Safe default: do not auto-open any output port unless explicitly requested.
+    # This avoids noisy WinMM errors on systems where only "Microsoft GS Wavetable Synth" exists.
+    if not want:
+        return None
+
+    if want:
+        w = want.lower()
+        for n in names:
+            if w in n.lower():
+                pick = n
+                break
+
+    def _is_gs_wavetable(port_name: str) -> bool:
+        ln = (port_name or "").lower()
+        return ("microsoft gs" in ln) or ("wavetable" in ln)
+
+    if pick is None:
+        # Safe default: do not auto-select any MIDI output unless explicitly configured.
+        return None
+
+    try:
+        return mido.open_output(pick)
+    except Exception:
+        # Some backends print noisy WinMM errors even if we catch exceptions.
+        # Treat as "no output" and keep StepSeq running.
+        return None
+
+# ----------------------------------------------------------------------
 # Step Sequencer curses mode
 # ----------------------------------------------------------------------
 
@@ -285,6 +482,28 @@ def stepseq_mode(
     # APS가 그려놓은 기존 화면을 완전히 지우기
     stdscr.clear()
     stdscr.refresh()
+
+    # --- StepSeq live input state (MVP-1) ---
+    # REC armed: when ON, incoming MIDI NoteOn will stamp into current cursor step.
+    rec_armed = False
+    advance_step_on_hit = True  # step-recording feel
+    midi_in = _open_stepseq_midi_input()
+    midi_ok = bool(midi_in)
+
+        # Detect whether an external pad/controller is present (affects MIDI OUT policy)
+    pad_present = _detect_stepseq_pad_present()
+
+    midi_out = _open_stepseq_midi_output(pad_present=pad_present)
+    midi_out_ok = bool(midi_out)
+
+    status_msg = ""
+    status_msg_until = 0.0
+
+    # Non-blocking keyboard so we can poll MIDI in the same loop.
+    try:
+        stdscr.nodelay(True)
+    except Exception:
+        pass
 
 
     # --- StepSeq local color pairs (avoid clobbering main UI) ---
@@ -355,6 +574,159 @@ def stepseq_mode(
 
     baseline_sig = _grid_signature(grid)
 
+    # ------------------------------------------------------------------
+    # StepSeq UI helpers (status + audition) and slot/empty-lane policy
+    # ------------------------------------------------------------------
+
+    def _set_status(msg: str, duration_sec: float = 1.2):
+        nonlocal status_msg, status_msg_until
+        status_msg = str(msg or "")
+        status_msg_until = time.time() + float(duration_sec)
+
+    def _status_now() -> str:
+        if status_msg and (time.time() <= status_msg_until):
+            return status_msg
+        return ""
+
+    # Core lanes are protected from reassignment (editor policy)
+    CORE_ABBR = {"KK", "SN", "CH", "OH"}
+
+    # Reference map for new lanes (2-letter abbr + <=6 label)
+    REF_NOTE_MAP = {
+        36: ("KK", "KICK"),
+        38: ("SN", "SNARE"),
+        42: ("CH", "HH_CL"),
+        46: ("OH", "HH_OP"),
+        47: ("MT", "TOM_M"),
+        45: ("LT", "TOM_L"),
+        50: ("HT", "TOM_H"),
+        49: ("CR", "CRASH"),
+        51: ("RD", "RIDE"),
+        39: ("CL", "CLAP"),
+        54: ("TA", "TAMB"),
+        56: ("CB", "COWBL"),
+        37: ("RM", "RIM"),
+        82: ("SH", "SHAKR"),
+        76: ("HW", "WBLK_H"),
+        55: ("SP", "SPLASH"),
+        44: ("PH", "HH_PED"),
+    }
+
+    def _preview_note(note: int, vel: int):
+        """Play a very short audition note (if MIDI OUT is available)."""
+        if midi_out is None or mido is None:
+            return
+        try:
+            n = int(note)
+            v = int(vel)
+        except Exception:
+            return
+        if n <= 0 or v <= 0:
+            return
+        try:
+            midi_out.send(mido.Message("note_on", channel=int(meta.channel), note=n, velocity=v))
+            time.sleep(0.03)
+            midi_out.send(mido.Message("note_off", channel=int(meta.channel), note=n, velocity=0))
+        except Exception:
+            pass
+
+    def _play_grid_once():
+        """
+        StepSeq-local playback (one loop) using the SAME midi_out policy as preview.
+        - If midi_out is None, playback is muted.
+        """
+        if midi_out is None or mido is None:
+            _set_status("PLAY muted (no MIDI OUT)", duration_sec=1.2)
+            return
+
+        bpm = int(getattr(meta, "bpm", 120) or 120)
+        spb_local = int(getattr(meta, "steps_per_bar", 16) or 16)
+        if bpm <= 0:
+            bpm = 120
+        if spb_local <= 0:
+            spb_local = max(1, grid.steps // 2)
+
+        # One bar = 4 quarter notes -> seconds per step:
+        step_sec = (60.0 / float(bpm)) * (4.0 / float(spb_local))
+
+        try:
+            for s in range(grid.steps):
+                fired = []
+                for ln in grid.lanes:
+                    cell = ln.cells[s]
+                    if not cell.on:
+                        continue
+                    v = int(cell.vel or 0)
+                    if v <= 0:
+                        continue
+                    n = int(ln.note)
+                    midi_out.send(mido.Message("note_on", channel=int(meta.channel), note=n, velocity=v))
+                    fired.append(n)
+
+                # Drum notes can be short; keep them within the step.
+                on_dur = min(0.03, max(0.005, step_sec * 0.30))
+                time.sleep(on_dur)
+                for n in fired:
+                    try:
+                        midi_out.send(mido.Message("note_off", channel=int(meta.channel), note=int(n), velocity=0))
+                    except Exception:
+                        pass
+
+                rem = step_sec - on_dur
+                if rem > 0:
+                    time.sleep(rem)
+        except Exception:
+            # Do not crash StepSeq if playback fails
+            _set_status("PLAY failed (MIDI OUT error)", duration_sec=1.2)
+            return
+    def _lane_is_empty(lane: StepLane) -> bool:
+        for c in lane.cells:
+            if getattr(c, "on", False):
+                return False
+        return True
+
+    def _has_empty_reassignable_lane() -> bool:
+        """StepSeq-side approximation of main's 'empty slot exists' rule."""
+        for ln in grid.lanes:
+            nm = (ln.name or "").strip()
+            if nm in CORE_ABBR:
+                continue
+            if _lane_is_empty(ln):
+                return True
+        return False
+
+    def _ensure_lane_for_note(note: int) -> int:
+        """
+        Return lane index for note.
+
+        MVP-1 policy alignment with aps_main slot reassignment:
+          - If note already exists in lanes: return its lane index.
+          - If note is new:
+              * Reuse the first completely empty NON-CORE lane as a "reassigned slot".
+              * If no such lane exists, return -1 (caller should reject).
+        """
+        n = int(note)
+        for li, ln in enumerate(grid.lanes):
+            if int(getattr(ln, "note", -9999)) == n:
+                return li
+
+        # Find an empty, reassignable (non-core) lane to redefine
+        for li, ln in enumerate(grid.lanes):
+            nm = (ln.name or "").strip()
+            if nm in CORE_ABBR:
+                continue
+            if _lane_is_empty(ln):
+                abbr, _lbl = REF_NOTE_MAP.get(n, (f"N{n}", f"NOTE{n}"))
+                ln.name = abbr
+                ln.note = n
+                # cells are already empty by definition, but keep it explicit/safe
+                for c in ln.cells:
+                    c.on = False
+                    c.vel = 0
+                return li
+
+        return -1
+
     def clamp_cursor():
         nonlocal cur_lane, cur_step, page
         if cur_lane < 0:
@@ -378,8 +750,11 @@ def stepseq_mode(
         except curses.error:
             pass
 
+        rec_txt = "ON" if rec_armed else "OFF"
+        midi_txt = ("IN:" + ("OK" if midi_ok else "NA") + " OUT:" + ("OK" if midi_out_ok else "NA") + " PAD:" + ("Y" if pad_present else "N"))
+
         header = (
-            "[STEP] {name}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  MOD={mod}"
+            "[STEP] {name}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  MOD={mod}  REC={rec}  MIDI={midi}"
             .format(
                 name=(meta.name + ('*' if modified else '')),
                 ch=meta.channel + 1,
@@ -387,6 +762,8 @@ def stepseq_mode(
                 steps=grid.steps,
                 bpm=meta.bpm,
                 mod="Y" if modified else "N",
+                rec=rec_txt,
+                midi=midi_txt,
             )
         )
         try:
@@ -527,7 +904,19 @@ def stepseq_mode(
         except curses.error:
             pass
 
-        footer = "Move: arrows/h/j/k/l  Enter:write accent / toggle off  A:accent  J/K:vel  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play  w:save  q/Esc:exit"
+        # Status line (transient)
+        try:
+            y_stat = max_y - 4
+            msg = _status_now()
+            if msg:
+                stdscr.addnstr(y_stat, 2, msg.ljust(max_x - 4), max_x - 4, curses.A_BOLD)
+            else:
+                stdscr.addnstr(y_stat, 2, " ".ljust(max_x - 4), max_x - 4)
+        except curses.error:
+            pass
+
+
+        footer = "Move: arrows/h/j/k/l  Enter:write accent / toggle off  A:accent  J/K:vel  r:REC(arm)  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play  w:save  q/Esc:exit"
         # Footer can be long; wrap it to the window width (2 lines reserved)
         footer_y = max_y - 3
         footer_w = max(1, max_x - 2)
@@ -589,6 +978,66 @@ def stepseq_mode(
             draw()
             continue
 
+        # Poll MIDI (non-blocking). When REC armed, NoteOn stamps into current cursor step.
+        # Poll MIDI (non-blocking).
+        # - REC=OFF: preview-only (sound only if MIDI OUT is available), no grid changes.
+        # - REC=ON : stamp into current playhead step.
+        midi_hit = False
+        if midi_in is not None:
+            try:
+                for msg in midi_in.iter_pending():
+                    if getattr(msg, "type", None) != "note_on":
+                        continue
+                    vel = int(getattr(msg, "velocity", 0) or 0)
+                    if vel <= 0:
+                        continue
+
+                    note = int(getattr(msg, "note", -1))
+
+                    if not rec_armed:
+                        # Friendly preview while not recording
+                        _preview_note(note, vel)
+                        _set_status(f"PREVIEW NOTE {note}  vel={vel}", duration_sec=0.6)
+                        midi_hit = True
+                        continue
+
+                    # REC armed: allow stamping.
+                    # If note is not in lanes yet, allow only if an empty reassignable lane exists (core excluded).
+                    lane_exists = any(int(getattr(ln, "note", -9999)) == note for ln in grid.lanes)
+                    if (not lane_exists) and (not _has_empty_reassignable_lane()):
+                        _preview_note(note, vel)
+                        _set_status(f"NO EMPTY SLOT (NOTE {note})", duration_sec=1.2)
+                        midi_hit = True
+                        continue
+
+                    lane_idx = _ensure_lane_for_note(note)
+                    if lane_idx < 0:
+                        _preview_note(note, vel)
+                        _set_status(f"NO EMPTY SLOT (NOTE {note})", duration_sec=1.2)
+                        midi_hit = True
+                        continue
+
+                    cell = grid.lanes[lane_idx].cells[cur_step]
+                    cell.on = True
+                    cell.vel = vel
+                    modified = True
+                    midi_hit = True
+
+                    if advance_step_on_hit:
+                        cur_step = (cur_step + 1) % grid.steps
+            except Exception:
+                # If MIDI port dies, disable it silently (MVP-friendly)
+                try:
+                    midi_in.close()
+                except Exception:
+                    pass
+                midi_in = None
+                midi_ok = False
+        # Avoid busy-loop when no key and no MIDI
+        if key == -1 and not midi_hit:
+            time.sleep(0.005)
+            continue
+
         if key in (curses.KEY_UP, ord("k")):
             cur_lane -= 1
         elif key in (curses.KEY_DOWN, ord("j")):
@@ -599,6 +1048,10 @@ def stepseq_mode(
             cur_step = (cur_step + 1) % grid.steps
         elif key == ord("\t"):
             cur_lane = (cur_lane + 1) % len(grid.lanes)
+
+        elif key == ord("r"):
+            # StepSeq live input: toggle REC(arm)
+            rec_armed = not rec_armed
 
         elif key == ord("["):
             # previous page
@@ -623,7 +1076,8 @@ def stepseq_mode(
                 cur_step = end
 
         elif key == ord("\n"):  # Enter
-            cell = grid.lanes[cur_lane].cells[cur_step]
+            lane = grid.lanes[cur_lane]
+            cell = lane.cells[cur_step]
             if cell.on:
                 # Enter toggles OFF when a note already exists
                 cell.on = False
@@ -632,6 +1086,8 @@ def stepseq_mode(
                 # Enter writes a note using the current input accent (SOFT/MEDIUM/STRONG)
                 cell.on = True
                 cell.vel = level_to_vel(enter_accent_level)
+                # Friendly audition on creation
+                _preview_note(lane.note, cell.vel)
             modified = True
 
         elif key in (ord('a'), ord('A')):  # Shift+A: cycle Enter input accent (SOFT -> MEDIUM -> STRONG)
@@ -651,6 +1107,7 @@ def stepseq_mode(
                 lvl = _adjust_level_1_3(lvl, +1)
                 cell.vel = level_to_vel(lvl)
                 modified = True
+                _preview_note(grid.lanes[cur_lane].note, cell.vel)
         elif key in (ord('J'), ord(',')):  # Shift+J: weaker (vim-style, non-cycling)
             cell = grid.lanes[cur_lane].cells[cur_step]
             if cell.on:
@@ -730,20 +1187,30 @@ def stepseq_mode(
 
         # Space: 현재 그리드를 한 번 재생
         elif key == 32:  # Space
-            if play_callback:
-                # 1) 재생 실행
-                play_callback(grid, meta)
+            # Playback uses the SAME MIDI OUT policy as preview.
+            # - pad_present=True : never auto-open GS; if no APS_STEPSEQ_MIDI_OUT, playback is muted.
+            # - pad_present=False: GS may be used as default (midi_out may be GS).
+            if midi_out is not None:
+                _play_grid_once()
+            else:
+                if pad_present:
+                    _set_status("PLAY muted (set APS_STEPSEQ_MIDI_OUT)", duration_sec=1.2)
+                else:
+                    # Legacy fallback: if no midi_out but a main-provided callback exists, use it.
+                    if play_callback:
+                        play_callback(grid, meta)
+                    else:
+                        _set_status("PLAY muted (no MIDI OUT)", duration_sec=1.2)
 
-                # 2) 재생 동안 쌓인 키(특히 Space)를 모두 버리기
-                try:
-                    stdscr.nodelay(True)
-                    while True:
-                        k2 = stdscr.getch()
-                        if k2 == -1:
-                            break
-                    stdscr.nodelay(False)
-                except curses.error:
-                    stdscr.nodelay(False)
+            # Drain queued keys (esp. Space)
+            try:
+                stdscr.nodelay(True)
+                while True:
+                    k2 = stdscr.getch()
+                    if k2 == -1:
+                        break
+            except curses.error:
+                pass
 
 
         elif key in (ord("w"), ord("W")):
@@ -776,6 +1243,18 @@ def stepseq_mode(
         stdscr.clear()
         stdscr.refresh()
     except curses.error:
+        pass
+
+    # Close StepSeq MIDI ports (optional)
+    try:
+        if midi_in is not None:
+            midi_in.close()
+    except Exception:
+        pass
+    try:
+        if midi_out is not None:
+            midi_out.close()
+    except Exception:
         pass
 
     new_events = _apply_stepgrid_to_events(grid, meta, non_grid)
