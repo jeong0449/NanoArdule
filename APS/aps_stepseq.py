@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import List, Callable, Optional, Tuple
 import os
 import time
+import heapq
 
 # Optional dependency (for StepSeq live pad input)
 try:
@@ -490,7 +491,7 @@ def stepseq_mode(
     midi_in = _open_stepseq_midi_input()
     midi_ok = bool(midi_in)
 
-        # Detect whether an external pad/controller is present (affects MIDI OUT policy)
+    # Detect whether an external pad/controller is present (affects MIDI OUT policy)
     pad_present = _detect_stepseq_pad_present()
 
     midi_out = _open_stepseq_midi_output(pad_present=pad_present)
@@ -574,6 +575,61 @@ def stepseq_mode(
 
     baseline_sig = _grid_signature(grid)
 
+    # --- MVP-2: metronome + non-blocking playback loop ---
+    metro_on = False
+    playing = False
+    play_step = 0
+    next_step_t = 0.0
+    gate_sec = 0.030  # short drum gate
+
+    # Input snap window (msec) around step boundaries.
+    # If a hit arrives within this window at the very start of a step, snap to the previous step.
+    # If it arrives within this window at the very end of a step, snap to the next step.
+    SNAP_MS = 40  # symmetric early/late tolerance for human timing
+
+    # Recording timing offset (msec). Negative = stamp slightly earlier.
+    # This compensates for consistent human/chain latency so hits land on the intended grid.
+    RECORD_OFFSET_MS = -25
+
+    # When playing, monitoring the input can double-trigger against the sequenced hit.
+    # Reduce monitoring velocity slightly to keep the feel without smearing timing.
+    MONITOR_PLAY_GAIN = 0.70
+
+    # MVP-2.6: loop scope + count-in (simple, no option sprawl)
+    # - Default loop is the *current bar* (bar-local loop), which greatly improves overdub feel.
+    # - When REC is armed and playback starts, we run a 1-bar count-in (click only, no stamping).
+    LOOP_BAR_DEFAULT = False
+    COUNTIN_BARS = 1  # fixed 1-bar count-in for MVP
+
+    loop_bar = LOOP_BAR_DEFAULT
+    loop_bar_user_override = False  # becomes True after user presses 'b'
+    loop_start = 0
+    loop_end = int(grid.steps)
+
+    countin_remaining_steps = 0
+    countin_step = 0
+
+
+    # Metronome click (GM-ish defaults)
+    CLICK_NOTE = 37  # Rim/Side Stick (works well on GS + many modules)
+    CLICK_VEL_STRONG = 100
+    CLICK_VEL_WEAK = 60
+
+    beats_per_bar = 4
+    spb_local = int(getattr(meta, "steps_per_bar", 16) or 16)
+    if spb_local <= 0:
+        spb_local = max(1, grid.steps // 2)
+    beat_len = (spb_local // beats_per_bar) if (spb_local % beats_per_bar == 0) else None
+
+    bpm_local = int(getattr(meta, "bpm", 120) or 120)
+    if bpm_local <= 0:
+        bpm_local = 120
+    sec_per_step = (60.0 / float(bpm_local)) * (float(beats_per_bar) / float(spb_local))
+
+    # Pending note-offs (min-heap): (off_time_monotonic, note_int)
+    pending_note_off = []
+
+
     # ------------------------------------------------------------------
     # StepSeq UI helpers (status + audition) and slot/empty-lane policy
     # ------------------------------------------------------------------
@@ -614,6 +670,10 @@ def stepseq_mode(
 
     def _preview_note(note: int, vel: int):
         """Play a very short audition note (if MIDI OUT is available)."""
+        # During PLAY, monitoring/audition causes double-trigger with sequencer playback.
+        # Disable it for stable real-time recording.
+        if playing:
+            return
         if midi_out is None or mido is None:
             return
         try:
@@ -630,55 +690,182 @@ def stepseq_mode(
         except Exception:
             pass
 
-    def _play_grid_once():
-        """
-        StepSeq-local playback (one loop) using the SAME midi_out policy as preview.
-        - If midi_out is None, playback is muted.
-        """
-        if midi_out is None or mido is None:
-            _set_status("PLAY muted (no MIDI OUT)", duration_sec=1.2)
+
+    def _monitor_hit(note: int, vel: int, now_t: float) -> None:
+        """Non-blocking monitoring: send note_on + scheduled note_off."""
+        if playing:
             return
+        if midi_out is None or mido is None:
+            return
+        try:
+            n = int(note)
+            v = int(vel)
+            # Slightly attenuate monitoring while playing to reduce double-trigger smear.
+            if playing:
+                try:
+                    v = max(1, int(round(v * float(MONITOR_PLAY_GAIN))))
+                except Exception:
+                    v = v
+        except Exception:
+            return
+        if n <= 0 or v <= 0:
+            return
+        if _send_note_on(n, v):
+            _schedule_note_off(n, float(now_t) + gate_sec)
 
-        bpm = int(getattr(meta, "bpm", 120) or 120)
-        spb_local = int(getattr(meta, "steps_per_bar", 16) or 16)
-        if bpm <= 0:
-            bpm = 120
-        if spb_local <= 0:
-            spb_local = max(1, grid.steps // 2)
+    def _pick_input_step(now_t: float) -> int:
+        """Choose the best target step for an input hit.
 
-        # One bar = 4 quarter notes -> seconds per step:
-        step_sec = (60.0 / float(bpm)) * (4.0 / float(spb_local))
+        We treat the grid (step index) as authoritative, but compensate for
+        consistent latency and human timing drift:
+
+        - Apply RECORD_OFFSET_MS (negative stamps slightly earlier)
+        - If the adjusted hit falls near the step start, snap to previous
+        - If it falls near the step end, snap to next
+        """
+        if not playing:
+            return int(cur_step)
 
         try:
-            for s in range(grid.steps):
-                fired = []
-                for ln in grid.lanes:
-                    cell = ln.cells[s]
-                    if not cell.on:
-                        continue
-                    v = int(cell.vel or 0)
-                    if v <= 0:
-                        continue
-                    n = int(ln.note)
-                    midi_out.send(mido.Message("note_on", channel=int(meta.channel), note=n, velocity=v))
-                    fired.append(n)
+            sp = float(sec_per_step)
+            if sp <= 0:
+                return int(cur_step)
 
-                # Drum notes can be short; keep them within the step.
-                on_dur = min(0.03, max(0.005, step_sec * 0.30))
-                time.sleep(on_dur)
-                for n in fired:
-                    try:
-                        midi_out.send(mido.Message("note_off", channel=int(meta.channel), note=int(n), velocity=0))
-                    except Exception:
-                        pass
+            # Step start time for the *current* step (cur_step).
+            step_start_t = float(next_step_t) - sp
 
-                rem = step_sec - on_dur
-                if rem > 0:
-                    time.sleep(rem)
+            # Apply constant offset to compensate for consistent latency.
+            t_eff = float(now_t) + (float(RECORD_OFFSET_MS) / 1000.0)
+
+            # Phase relative to current step start (can be <0 or >sp due to offset).
+            phase = t_eff - step_start_t
+
+            # Clamp snap window to < half-step to avoid pathological snapping.
+            snap = min(float(SNAP_MS) / 1000.0, sp * 0.45)
+
+            # Snap logic (symmetric): near start => previous, near end => next.
+            if phase < snap:
+                return (int(cur_step) - 1) % int(grid.steps)
+            if phase > (sp - snap):
+                return (int(cur_step) + 1) % int(grid.steps)
         except Exception:
-            # Do not crash StepSeq if playback fails
-            _set_status("PLAY failed (MIDI OUT error)", duration_sec=1.2)
+            pass
+
+        return int(cur_step)
+
+
+    def _send_note_on(note: int, vel: int) -> bool:
+        if midi_out is None or mido is None:
+            return False
+        try:
+            midi_out.send(mido.Message("note_on", channel=int(meta.channel), note=int(note), velocity=int(vel)))
+            return True
+        except Exception:
+            return False
+
+    def _send_note_off(note: int) -> None:
+        if midi_out is None or mido is None:
             return
+        try:
+            midi_out.send(mido.Message("note_off", channel=int(meta.channel), note=int(note), velocity=0))
+        except Exception:
+            pass
+
+    def _schedule_note_off(note: int, off_time: float) -> None:
+        try:
+            heapq.heappush(pending_note_off, (float(off_time), int(note)))
+        except Exception:
+            pass
+
+    def _process_pending_note_off(now_t: float) -> None:
+        while pending_note_off and pending_note_off[0][0] <= now_t:
+            _t, n = heapq.heappop(pending_note_off)
+            _send_note_off(n)
+
+    def _tick_playback(now_t: float) -> None:
+        nonlocal play_step, next_step_t, cur_step, page, loop_start, loop_end, countin_remaining_steps, countin_step
+
+        if (not playing) or (now_t < next_step_t):
+            return
+
+        # -----------------------------
+        # Count-in: click only, no grid playback, no stamping
+        # -----------------------------
+        if countin_remaining_steps > 0:
+            if midi_out is not None and mido is not None:
+                vel = None
+                # Strong click on bar start of count-in
+                if (countin_step % spb_local) == 0:
+                    vel = CLICK_VEL_STRONG
+                # Weak click on beat boundaries
+                elif beat_len is not None and (countin_step % beat_len) == 0:
+                    vel = CLICK_VEL_WEAK
+                if vel is not None:
+                    if _send_note_on(CLICK_NOTE, int(vel)):
+                        _schedule_note_off(CLICK_NOTE, now_t + gate_sec)
+
+            countin_remaining_steps -= 1
+            countin_step += 1
+
+            # Keep cursor parked at loop start during count-in (stable visual anchor)
+            cur_step = int(loop_start)
+            page = cur_step // page_size
+
+            # When count-in finishes, start actual loop at loop_start
+            if countin_remaining_steps <= 0:
+                play_step = int(loop_start)
+                cur_step = int(loop_start)
+                page = cur_step // page_size
+
+            # Schedule next tick (drift-safe)
+            next_step_t = next_step_t + sec_per_step
+            if next_step_t < now_t - sec_per_step:
+                next_step_t = now_t + sec_per_step
+            return
+
+        # -----------------------------
+        # Normal playback: fire grid notes at current play_step
+        # -----------------------------
+        if midi_out is not None and mido is not None:
+            for ln in grid.lanes:
+                cell = ln.cells[play_step]
+                if not cell.on:
+                    continue
+                v = int(cell.vel or 0)
+                if v <= 0:
+                    continue
+                n = int(ln.note)
+                if _send_note_on(n, v):
+                    _schedule_note_off(n, now_t + gate_sec)
+
+            # Metronome click (if enabled)
+            if metro_on:
+                vel = None
+                if play_step % spb_local == 0:
+                    vel = CLICK_VEL_STRONG
+                elif beat_len is not None and (play_step % beat_len == 0):
+                    vel = CLICK_VEL_WEAK
+                if vel is not None:
+                    if _send_note_on(CLICK_NOTE, int(vel)):
+                        _schedule_note_off(CLICK_NOTE, now_t + gate_sec)
+
+        # Keep cursor synced to the *current* playhead step (the one we just fired)
+        cur_step = int(play_step)
+        page = cur_step // page_size
+
+        # Advance playhead for the next tick (loop current bar by default)
+        play_step = int(play_step) + 1
+        if loop_bar:
+            if play_step >= loop_end:
+                play_step = int(loop_start)
+        else:
+            if play_step >= int(grid.steps):
+                play_step = 0
+
+        # Schedule next tick (drift-safe)
+        next_step_t = next_step_t + sec_per_step
+        if next_step_t < now_t - sec_per_step:
+            next_step_t = now_t + sec_per_step
     def _lane_is_empty(lane: StepLane) -> bool:
         for c in lane.cells:
             if getattr(c, "on", False):
@@ -751,7 +938,7 @@ def stepseq_mode(
             pass
 
         rec_txt = "ON" if rec_armed else "OFF"
-        midi_txt = ("IN:" + ("OK" if midi_ok else "NA") + " OUT:" + ("OK" if midi_out_ok else "NA") + " PAD:" + ("Y" if pad_present else "N"))
+        midi_txt = ("IN:" + ("OK" if midi_ok else "NA") + " OUT:" + ("OK" if midi_out_ok else "NA") + " PAD:" + ("Y" if pad_present else "N") + " PLAY:" + ("Y" if playing else "N") + " METRO:" + ("Y" if metro_on else "N") + " LOOP:" + ("BAR" if loop_bar else "FULL") + (" CIN" if (countin_remaining_steps > 0) else ""))
 
         header = (
             "[STEP] {name}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  MOD={mod}  REC={rec}  MIDI={midi}"
@@ -916,7 +1103,7 @@ def stepseq_mode(
             pass
 
 
-        footer = "Move: arrows/h/j/k/l  Enter:write accent / toggle off  A:accent  J/K:vel  r:REC(arm)  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play  w:save  q/Esc:exit"
+        footer = "Move: arrows/h/j/k/l  Enter:write accent / toggle off  A:accent  J/K:vel  r:REC(arm)  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play/stop  b:loop  m:metro  w:save  q/Esc:exit"
         # Footer can be long; wrap it to the window width (2 lines reserved)
         footer_y = max_y - 3
         footer_w = max(1, max_x - 2)
@@ -978,6 +1165,10 @@ def stepseq_mode(
             draw()
             continue
 
+        now_t = time.monotonic()
+        _process_pending_note_off(now_t)
+        _tick_playback(now_t)
+
         # Poll MIDI (non-blocking). When REC armed, NoteOn stamps into current cursor step.
         # Poll MIDI (non-blocking).
         # - REC=OFF: preview-only (sound only if MIDI OUT is available), no grid changes.
@@ -996,34 +1187,50 @@ def stepseq_mode(
 
                     if not rec_armed:
                         # Friendly preview while not recording
-                        _preview_note(note, vel)
+                        now_t = time.monotonic()
+                        _monitor_hit(note, vel, now_t)
                         _set_status(f"PREVIEW NOTE {note}  vel={vel}", duration_sec=0.6)
                         midi_hit = True
                         continue
 
                     # REC armed: allow stamping.
+                    # During count-in, do NOT stamp; preview/monitor only.
+                    if countin_remaining_steps > 0:
+                        now_t = time.monotonic()
+                        _monitor_hit(note, vel, now_t)
+                        _set_status("COUNT-IN (no recording)", duration_sec=0.6)
+                        midi_hit = True
+                        continue
+
                     # If note is not in lanes yet, allow only if an empty reassignable lane exists (core excluded).
                     lane_exists = any(int(getattr(ln, "note", -9999)) == note for ln in grid.lanes)
                     if (not lane_exists) and (not _has_empty_reassignable_lane()):
-                        _preview_note(note, vel)
+                        now_t = time.monotonic()
+                        _monitor_hit(note, vel, now_t)
                         _set_status(f"NO EMPTY SLOT (NOTE {note})", duration_sec=1.2)
                         midi_hit = True
                         continue
 
                     lane_idx = _ensure_lane_for_note(note)
                     if lane_idx < 0:
-                        _preview_note(note, vel)
+                        now_t = time.monotonic()
+                        _monitor_hit(note, vel, now_t)
                         _set_status(f"NO EMPTY SLOT (NOTE {note})", duration_sec=1.2)
                         midi_hit = True
                         continue
 
-                    cell = grid.lanes[lane_idx].cells[cur_step]
+                    # Monitor / audition input while recording as well (MVP-2 UX):
+                    # Non-blocking monitor + symmetric early/late snap to the nearest intended step.
+                    now_t = time.monotonic()
+                    target_step = _pick_input_step(now_t)
+                    cell = grid.lanes[lane_idx].cells[target_step]
+                    _monitor_hit(note, vel, now_t)
                     cell.on = True
-                    cell.vel = vel
+                    cell.vel = max(int(getattr(cell, "vel", 0) or 0), int(vel))
                     modified = True
                     midi_hit = True
 
-                    if advance_step_on_hit:
+                    if advance_step_on_hit and (not playing):
                         cur_step = (cur_step + 1) % grid.steps
             except Exception:
                 # If MIDI port dies, disable it silently (MVP-friendly)
@@ -1035,7 +1242,13 @@ def stepseq_mode(
                 midi_ok = False
         # Avoid busy-loop when no key and no MIDI
         if key == -1 and not midi_hit:
-            time.sleep(0.005)
+            # If playing, don't oversleep past the next step time.
+            if playing:
+                now2 = time.monotonic()
+                dt = max(0.0, next_step_t - now2)
+                time.sleep(min(0.005, dt))
+            else:
+                time.sleep(0.005)
             continue
 
         if key in (curses.KEY_UP, ord("k")):
@@ -1185,22 +1398,83 @@ def stepseq_mode(
                         dst.vel = src.vel
                 modified = True
 
-        # Space: 현재 그리드를 한 번 재생
-        elif key == 32:  # Space
-            # Playback uses the SAME MIDI OUT policy as preview.
-            # - pad_present=True : never auto-open GS; if no APS_STEPSEQ_MIDI_OUT, playback is muted.
-            # - pad_present=False: GS may be used as default (midi_out may be GS).
-            if midi_out is not None:
-                _play_grid_once()
-            else:
-                if pad_present:
-                    _set_status("PLAY muted (set APS_STEPSEQ_MIDI_OUT)", duration_sec=1.2)
+
+        elif key in (ord("m"), ord("M")):
+            metro_on = not metro_on
+            if metro_on:
+                if midi_out is None:
+                    _set_status("METRO ON (muted: no MIDI OUT)", duration_sec=1.2)
                 else:
-                    # Legacy fallback: if no midi_out but a main-provided callback exists, use it.
-                    if play_callback:
-                        play_callback(grid, meta)
+                    _set_status("METRO ON", duration_sec=0.8)
+            else:
+                _set_status("METRO OFF", duration_sec=0.6)
+
+        elif key in (ord("b"), ord("B")):
+            loop_bar_user_override = True
+            loop_bar = not loop_bar
+            if loop_bar:
+                _set_status("LOOP BAR", duration_sec=0.7)
+            else:
+                _set_status("LOOP FULL", duration_sec=0.7)
+
+        elif key == 32:  # Space
+            # MVP-2.6: toggle playback loop (non-blocking), default loop is the *current bar*.
+            playing = not playing
+            if playing:
+                # Auto loop policy:
+                # - Default (REC OFF): FULL loop
+                # - When REC is armed and playback starts: BAR loop (unless user explicitly toggled with 'b')
+                if rec_armed and (not loop_bar_user_override):
+                    loop_bar = True
+
+                # Determine loop scope
+                if loop_bar:
+                    try:
+                        loop_start = (int(cur_step) // int(spb_local)) * int(spb_local)
+                    except Exception:
+                        loop_start = 0
+                    loop_end = int(loop_start) + int(spb_local)
+                    if loop_end > int(grid.steps):
+                        loop_end = int(grid.steps)
+                else:
+                    loop_start = 0
+                    loop_end = int(grid.steps)
+
+                play_step = int(loop_start)
+                cur_step = int(loop_start)
+                page = cur_step // page_size
+
+                # 1-bar count-in when REC is armed (click only; stamping disabled during count-in)
+                if rec_armed and COUNTIN_BARS > 0:
+                    countin_remaining_steps = int(spb_local) * int(COUNTIN_BARS)
+                    countin_step = 0
+                else:
+                    countin_remaining_steps = 0
+                    countin_step = 0
+
+                next_step_t = time.monotonic()
+
+                if midi_out is None:
+                    if pad_present:
+                        _set_status("PLAY muted (set APS_STEPSEQ_MIDI_OUT)", duration_sec=1.2)
                     else:
                         _set_status("PLAY muted (no MIDI OUT)", duration_sec=1.2)
+                else:
+                    if countin_remaining_steps > 0:
+                        _set_status("PLAY (count-in 1bar)", duration_sec=0.9)
+                    else:
+                        _set_status("PLAY", duration_sec=0.6)
+            else:
+                # Stop: flush any pending note-offs immediately
+                try:
+                    while pending_note_off:
+                        _t, n = heapq.heappop(pending_note_off)
+                        _send_note_off(n)
+                except Exception:
+                    pass
+                countin_remaining_steps = 0
+                countin_step = 0
+                _set_status("STOP", duration_sec=0.6)
 
             # Drain queued keys (esp. Space)
             try:
@@ -1211,7 +1485,6 @@ def stepseq_mode(
                         break
             except curses.error:
                 pass
-
 
         elif key in (ord("w"), ord("W")):
             saved = True
