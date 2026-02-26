@@ -424,42 +424,6 @@ def _open_stepseq_midi_output(pad_present: bool = False):
         # Some backends print noisy WinMM errors even if we catch exceptions.
         # Treat as "no output" and keep StepSeq running.
         return None
-    try:
-        names = list(mido.get_output_names())
-    except Exception:
-        names = []
-    if not names:
-        return None
-
-    want = (os.environ.get("APS_STEPSEQ_MIDI_OUT") or "").strip()
-    pick = None
-
-    # Safe default: do not auto-open any output port unless explicitly requested.
-    # This avoids noisy WinMM errors on systems where only "Microsoft GS Wavetable Synth" exists.
-    if not want:
-        return None
-
-    if want:
-        w = want.lower()
-        for n in names:
-            if w in n.lower():
-                pick = n
-                break
-
-    def _is_gs_wavetable(port_name: str) -> bool:
-        ln = (port_name or "").lower()
-        return ("microsoft gs" in ln) or ("wavetable" in ln)
-
-    if pick is None:
-        # Safe default: do not auto-select any MIDI output unless explicitly configured.
-        return None
-
-    try:
-        return mido.open_output(pick)
-    except Exception:
-        # Some backends print noisy WinMM errors even if we catch exceptions.
-        # Treat as "no output" and keep StepSeq running.
-        return None
 
 # ----------------------------------------------------------------------
 # Step Sequencer curses mode
