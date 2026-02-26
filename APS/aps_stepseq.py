@@ -424,6 +424,42 @@ def _open_stepseq_midi_output(pad_present: bool = False):
         # Some backends print noisy WinMM errors even if we catch exceptions.
         # Treat as "no output" and keep StepSeq running.
         return None
+    try:
+        names = list(mido.get_output_names())
+    except Exception:
+        names = []
+    if not names:
+        return None
+
+    want = (os.environ.get("APS_STEPSEQ_MIDI_OUT") or "").strip()
+    pick = None
+
+    # Safe default: do not auto-open any output port unless explicitly requested.
+    # This avoids noisy WinMM errors on systems where only "Microsoft GS Wavetable Synth" exists.
+    if not want:
+        return None
+
+    if want:
+        w = want.lower()
+        for n in names:
+            if w in n.lower():
+                pick = n
+                break
+
+    def _is_gs_wavetable(port_name: str) -> bool:
+        ln = (port_name or "").lower()
+        return ("microsoft gs" in ln) or ("wavetable" in ln)
+
+    if pick is None:
+        # Safe default: do not auto-select any MIDI output unless explicitly configured.
+        return None
+
+    try:
+        return mido.open_output(pick)
+    except Exception:
+        # Some backends print noisy WinMM errors even if we catch exceptions.
+        # Treat as "no output" and keep StepSeq running.
+        return None
 
 # ----------------------------------------------------------------------
 # Step Sequencer curses mode
@@ -916,36 +952,53 @@ def stepseq_mode(
             stdscr.border()
         except curses.error:
             pass
+        rec_txt = "REC" if rec_armed else "rec"
+        mod_txt = "*" if modified else " "
 
-        rec_txt = "ON" if rec_armed else "OFF"
-        midi_txt = ("IN:" + ("OK" if midi_ok else "NA") + " OUT:" + ("OK" if midi_out_ok else "NA") + " PAD:" + ("Y" if pad_present else "N") + " PLAY:" + ("Y" if playing else "N") + " METRO:" + ("Y" if metro_on else "N") + " LOOP:" + ("BAR" if loop_bar else "FULL") + (" CIN" if (countin_remaining_steps > 0) else ""))
+        # Header line 1: short and stable (no wrapping)
+        name_txt = meta.name
+        # Trim name to keep header stable on narrow terminals
+        max_name = max(8, (max_x - 4) - 60)
+        if len(name_txt) > max_name:
+            name_txt = name_txt[:max_name-1] + "…"
 
-        header_full = (
-            "[STEP] {name}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  MOD={mod}  "
-            "REC={rec}  MIDI={midi}"
+        header1 = (
+            "[STEP]{mod} {name}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  {rec}"
         ).format(
-            name=(meta.name + ('*' if modified else '')),
+            mod=mod_txt,
+            name=name_txt,
             ch=meta.channel + 1,
             bars=meta.bars,
             steps=grid.steps,
             bpm=meta.bpm,
-            mod="Y" if modified else "N",
             rec=rec_txt,
-            midi=midi_txt,
         )
 
+        # Status line 2: compact badges
+        in_txt    = "IN:OK"    if midi_ok     else "IN:NA"
+        out_txt   = "OUT:OK"   if midi_out_ok else "OUT:NA"
+        pad_txt   = "PAD:Y"    if pad_present else "PAD:N"
+        play_txt  = "PLAY:Y"   if playing     else "PLAY:N"
+        metro_txt = "MET:Y"    if metro_on    else "MET:N"
+        loop_txt  = "LOOP:BAR" if loop_bar    else "LOOP:FULL"
+        cin_txt   = "CIN" if (countin_remaining_steps > 0) else ""
+
+        status2 = "  ".join([in_txt, out_txt, pad_txt, play_txt, metro_txt, loop_txt, cin_txt]).strip()
+
         header_w = max(1, max_x - 4)
-        header_lines = textwrap.wrap(header_full, width=header_w, break_long_words=False, break_on_hyphens=False) or [""]
         y = 1
-        for line in header_lines:
-            try:
-                stdscr.addnstr(y, 2, line.ljust(header_w), header_w)
-            except curses.error:
-                pass
-            y += 1
+        try:
+            stdscr.addnstr(y, 2, header1.ljust(header_w), header_w)
+        except curses.error:
+            pass
+        y += 1
+        try:
+            stdscr.addnstr(y, 2, status2.ljust(header_w), header_w)
+        except curses.error:
+            pass
 
         # One blank line after header
-        y_step = y + 1
+        y_step = y + 2
         col0 = 8
 
         # Visible step window: ONE BAR ONLY (bar page)
@@ -997,7 +1050,7 @@ def stepseq_mode(
             col += 3
             local_idx += 1
 
-        footer_full = "Move: arrows/h/j/k/l  Tab/Shift+Tab:step  Home:bar start  Enter:write accent / toggle off  A:accent  J/K:vel  r:REC(arm)  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play/stop  b:loop  m:metro  w:save  Backspace/Delete:clear last hit-group  q/Esc:exit"
+        footer_full = "Move: arrows/h/j/k/l  Tab/Shift+Tab:step  Home:bar start  Enter:write accent / toggle off  A:accent  J;/K':vel  r:REC(arm)  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play/stop  b:loop  m:metro  w:save  Backspace/Delete:clear last hit-group  q/Esc:exit"
         footer_w = max(1, max_x - 4)
         footer_lines = textwrap.wrap(footer_full, width=footer_w, break_long_words=False, break_on_hyphens=False) or [""]
 
@@ -1498,7 +1551,7 @@ def stepseq_mode(
             else:
                 enter_accent_level = 1
             # No data modified yet; just UI state
-        elif key in (ord('K'), ord('.')):  # Shift+K: stronger (vim-style, non-cycling)
+        elif key in (ord('K'), ord('\'')):  # Shift+K: stronger (vim-style, non-cycling)
             cell = grid.lanes[cur_lane].cells[cur_step]
             if cell.on:
                 lvl = vel_to_level(cell.vel)
@@ -1508,7 +1561,7 @@ def stepseq_mode(
                 cell.vel = level_to_vel(lvl)
                 modified = True
                 _preview_note(grid.lanes[cur_lane].note, cell.vel)
-        elif key in (ord('J'), ord(',')):  # Shift+J: weaker (vim-style, non-cycling)
+        elif key in (ord('J'), ord(';')):  # Shift+J: weaker (vim-style, non-cycling)
             cell = grid.lanes[cur_lane].cells[cur_step]
             if cell.on:
                 lvl = vel_to_level(cell.vel)
