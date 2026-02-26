@@ -980,6 +980,11 @@ bpm=bpm,
 
 
         # 8) Enter Step Sequencer (now P calls play_stepseq)
+        
+        # Propagate F6-selected MIDI OUT to StepSeq (overrides APS_STEPSEQ_MIDI_OUT)
+        if midi_port:
+            os.environ["APS_STEPSEQ_MIDI_OUT"] = str(midi_port)
+        
         modified, saved, new_events = aps_stepseq.stepseq_mode(
             stdscr,
             meta,
