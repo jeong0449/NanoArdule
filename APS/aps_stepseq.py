@@ -569,7 +569,17 @@ def stepseq_mode(
     cur_step = 0
     # One page = one bar (2-bar patterns only)
     page_size = int(getattr(meta, "steps_per_bar", 16) or 16)  # 12 / 16 / 24
-    page = 0  # 0 = bar1, 1 = bar2
+    # v3.0a Transport (Phase 2): separate viewBar vs playBar
+    # - view_bar: editing/view context (drives the visible bar/page)
+    # - play_bar: playback context (derived from play_step while playing)
+    # - queued_view_bar: requested view bar switch, applied ONLY at bar boundary
+    view_bar = 0
+    play_bar = 0
+    queued_view_bar = None  # type: Optional[int]
+
+    # Keep legacy variable name 'page' as an alias of view_bar for minimal change.
+    page = view_bar
+
 
     # Enter key will write notes using this accent level (1=SOFT, 2=MEDIUM, 3=STRONG)
     enter_accent_level = 2
@@ -799,7 +809,7 @@ def stepseq_mode(
             _send_note_off(n)
 
     def _tick_playback(now_t: float) -> None:
-        nonlocal play_step, next_step_t, cur_step, page, loop_start, loop_end, countin_remaining_steps, countin_step
+        nonlocal play_step, next_step_t, loop_start, loop_end, countin_remaining_steps, countin_step, view_bar, play_bar, queued_view_bar, page
 
         if (not playing) or (now_t < next_step_t):
             return
@@ -823,15 +833,11 @@ def stepseq_mode(
             countin_remaining_steps -= 1
             countin_step += 1
 
-            # Keep cursor parked at loop start during count-in (stable visual anchor)
-            cur_step = int(loop_start)
-            page = cur_step // page_size
+            # During count-in, keep editing cursor/view untouched (click-only).
 
             # When count-in finishes, start actual loop at loop_start
             if countin_remaining_steps <= 0:
                 play_step = int(loop_start)
-                cur_step = int(loop_start)
-                page = cur_step // page_size
 
             # Schedule next tick (drift-safe)
             next_step_t = next_step_t + sec_per_step
@@ -865,12 +871,18 @@ def stepseq_mode(
                     if _send_note_on(CLICK_NOTE, int(vel)):
                         _schedule_note_off(CLICK_NOTE, now_t + gate_sec)
 
-        # Keep cursor synced to the *current* playhead step (the one we just fired)
-        cur_step = int(play_step)
-        page = cur_step // page_size
+        # Update play_bar from the *current* playhead step (the one we just fired)
+        try:
+            play_bar = int(play_step) // int(spb_local)
+        except Exception:
+            play_bar = 0
+
+        # Do NOT force the edit cursor/view to follow playback in v3.0a Phase 2.
+        # (view_bar/page is user-controlled; bar switches are applied only at bar boundary.)
 
         # Advance playhead for the next tick (loop current bar by default)
-        play_step = int(play_step) + 1
+        prev_step = int(play_step)
+        play_step = prev_step + 1
         if loop_bar:
             if play_step >= loop_end:
                 play_step = int(loop_start)
@@ -878,7 +890,17 @@ def stepseq_mode(
             if play_step >= int(grid.steps):
                 play_step = 0
 
-        # Schedule next tick (drift-safe)
+        # Bar boundary hook: apply queued view-bar switch ONLY here.
+        # We define "bar boundary" as the moment we have advanced into step 0 of a bar.
+        if (play_step % int(spb_local)) == 0:
+            if queued_view_bar is not None:
+                try:
+                    view_bar = int(queued_view_bar)
+                except Exception:
+                    view_bar = int(view_bar)
+                queued_view_bar = None
+                page = int(view_bar)  # keep legacy alias
+# Schedule next tick (drift-safe)
         next_step_t = next_step_t + sec_per_step
         if next_step_t < now_t - sec_per_step:
             next_step_t = now_t + sec_per_step
@@ -930,18 +952,72 @@ def stepseq_mode(
 
         return -1
 
+    def _bar_count():
+
+        # v3.0a Phase 2: prefer explicit pattern/meta bar count when available.
+
+        try:
+
+            b = int(getattr(meta, "bars", 0) or 0)
+
+            if b > 0:
+
+                return b
+
+        except Exception:
+
+            pass
+
+        # Fallback: derive from grid.steps and page_size.
+
+        try:
+
+            ps = int(page_size) if int(page_size) > 0 else 16
+
+            st = int(getattr(grid, "steps", 0) or 0)
+
+            if st > 0 and ps > 0:
+
+                return max(1, (st + ps - 1) // ps)
+
+        except Exception:
+
+            pass
+
+        return 1
+
+    
+
+    def _max_view_bar():
+
+        return max(0, _bar_count() - 1)
+
+
     def clamp_cursor():
-        nonlocal cur_lane, cur_step, page
+        nonlocal cur_lane, cur_step, page, view_bar, queued_view_bar
         if cur_lane < 0:
             cur_lane = 0
         if cur_lane >= len(grid.lanes):
             cur_lane = len(grid.lanes) - 1
-        if cur_step < 0:
-            cur_step = 0
-        if cur_step >= grid.steps:
-            cur_step = grid.steps - 1
-        # 2-bar patterns: page is bar index (0 or 1)
-        page = cur_step // page_size
+
+        # Clamp view_bar within pattern bars
+        max_page = _max_view_bar()
+        if view_bar < 0:
+            view_bar = 0
+        if view_bar > max_page:
+            view_bar = max_page
+
+        # Keep legacy alias
+        page = int(view_bar)
+
+        # Clamp cursor step within the currently visible bar (view_bar)
+        bar_start = int(view_bar) * int(page_size)
+        bar_end = min(int(grid.steps), bar_start + int(page_size)) - 1
+        if cur_step < bar_start:
+            cur_step = bar_start
+        if cur_step > bar_end:
+            cur_step = bar_end
+
 
     def draw():
         max_y, max_x = stdscr.getmaxyx()
@@ -963,10 +1039,11 @@ def stepseq_mode(
             name_txt = name_txt[:max_name-1] + "…"
 
         header1 = (
-            "[STEP]{mod} {name}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  {rec}"
+            "[STEP]{mod} {name}  BAR={bar}/{bars}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  {rec}"
         ).format(
             mod=mod_txt,
             name=name_txt,
+            bar=int(page) + 1,
             ch=meta.channel + 1,
             bars=meta.bars,
             steps=grid.steps,
@@ -982,8 +1059,10 @@ def stepseq_mode(
         metro_txt = "MET:Y"    if metro_on    else "MET:N"
         loop_txt  = "LOOP:BAR" if loop_bar    else "LOOP:FULL"
         cin_txt   = "CIN" if (countin_remaining_steps > 0) else ""
+        view_txt  = f"VIEW:{int(page)+1}/{int(getattr(meta,'bars',1) or 1)}"
+        q_txt     = (f"Q:{int(queued_view_bar)+1}" if (playing and queued_view_bar is not None) else "")
 
-        status2 = "  ".join([in_txt, out_txt, pad_txt, play_txt, metro_txt, loop_txt, cin_txt]).strip()
+        status2 = "  ".join([t for t in [in_txt, out_txt, pad_txt, play_txt, metro_txt, loop_txt, view_txt, q_txt, cin_txt] if t]).strip()
 
         header_w = max(1, max_x - 4)
         y = 1
@@ -1016,13 +1095,14 @@ def stepseq_mode(
 
         col = col0
         for s in range(start_step, end_step):
-            # Step labels are bar-local (01..16), not global 01..32
-            label = "%02d" % ((s - start_step) + 1)
+            # Step labels are global (01..N), so bar 2 shows 17..32 (or triplet-aware 13..24).
+            label_width = 3 if int(grid.steps) >= 100 else 2
+            label = ("%0" + str(label_width) + "d") % (s + 1)
             try:
                 stdscr.addnstr(y_step, col, label, 2)
             except curses.error:
                 pass
-            col += 3
+            col += (label_width + 1)
 
         # Beat marker row (quarter-note based)
         beat_gap = 4
@@ -1047,7 +1127,7 @@ def stepseq_mode(
                 stdscr.addnstr(y_beat, col, " " + mark, 2)
             except curses.error:
                 pass
-            col += 3
+            col += (3 if int(grid.steps) < 100 else 4)
             local_idx += 1
 
         footer_full = "Move: arrows/h/j/k/l  Tab/Shift+Tab:step  Home:bar start  Enter:write accent / toggle off  A:accent  J;/K':vel  r:REC(arm)  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play/stop  b:loop  m:metro  w:save  Backspace/Delete:clear last hit-group  q/Esc:exit"
@@ -1507,26 +1587,37 @@ def stepseq_mode(
             rec_armed = not rec_armed
 
         elif key == ord("["):
-            # previous page
-            if page > 0:
-                page -= 1
-            start = page * page_size
-            end = min(start + page_size, grid.steps) - 1
-            if cur_step < start:
-                cur_step = start
-            if cur_step > end:
-                cur_step = end
+            # v3.0a Phase 2: viewBar switching is user-driven; during PLAY it is queued and applied at bar boundary.
+            if playing:
+                try:
+                    qb = max(0, int(view_bar) - 1)
+                except Exception:
+                    qb = 0
+                queued_view_bar = qb
+                _set_status(f"QUEUED VIEW BAR {qb+1}", duration_sec=0.6)
+            else:
+                if view_bar > 0:
+                    view_bar -= 1
+                queued_view_bar = None
+                page = int(view_bar)
+                clamp_cursor()
         elif key == ord("]"):
-            # next page
-            max_page = (grid.steps - 1) // page_size
-            if page < max_page:
-                page += 1
-            start = page * page_size
-            end = min(start + page_size, grid.steps) - 1
-            if cur_step < start:
-                cur_step = start
-            if cur_step > end:
-                cur_step = end
+            if playing:
+                try:
+                    max_page = _max_view_bar()
+                    qb = min(max_page, int(view_bar) + 1)
+                except Exception:
+                    qb = int(view_bar)
+                queued_view_bar = qb
+                _set_status(f"QUEUED VIEW BAR {qb+1}", duration_sec=0.6)
+            else:
+                max_page = _max_view_bar()
+                if view_bar < max_page:
+                    view_bar += 1
+                queued_view_bar = None
+                page = int(view_bar)
+                clamp_cursor()
+
 
         elif key == ord("\n"):  # Enter
             lane = grid.lanes[cur_lane]
@@ -1681,8 +1772,6 @@ def stepseq_mode(
                     loop_end = int(grid.steps)
 
                 play_step = int(loop_start)
-                cur_step = int(loop_start)
-                page = cur_step // page_size
 
                 # 1-bar count-in when REC is armed (click only; stamping disabled during count-in)
                 if rec_armed and COUNTIN_BARS > 0:
