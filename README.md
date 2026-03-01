@@ -2,6 +2,35 @@
 
 > **Note:** This repository is currently undergoing internal testing.  
 > Components will be released sequentially as they become stable.
+>
+> ⚠️ **Windows 11 Preview Update Compatibility Notice (KB5077241)**
+>
+> If you are running APS (Ardule Pattern Studio) on Windows 11 and experience a **completely blank screen** in the terminal (PowerShell / CMD / Windows Terminal), this may be caused by the Windows 11 Preview Update:
+>
+> **KB5077241 (Build 26200.7922, Feb 2026 Preview Update)**
+>
+> After installing this update, the curses-based TUI may initialize successfully but fail to render any visible output, even though the program continues running normally (no exceptions or crashes).
+>
+> ### Symptoms
+> - No visible UI (blank screen)
+> - No error messages
+> - Boot trace indicates normal startup
+> - CPU usage remains normal
+>
+> ### Resolution
+> Uninstall the preview update:
+>
+> 1. Settings → Windows Update → Update history  
+> 2. Uninstall updates  
+> 3. Remove **KB5077241**  
+> 4. Reboot
+>
+> After uninstalling the update, APS returns to normal behavior.
+>
+> This issue appears to be related to changes in Windows console rendering or terminal handling introduced in the preview build.
+>
+> We recommend avoiding optional/preview Windows updates when running curses-based terminal applications until compatibility is confirmed.
+> This behavior is not caused by APS logic errors, but by changes in Windows console rendering affecting `windows-curses` / PDCurses.
 
 **Ardule** is a complete open ecosystem for drum-pattern creation, conversion, playback, and analysis.  
 It integrates **Arduino-based real-time drum engines**, a Python-based pattern studio (APS), a curated pattern library,  
