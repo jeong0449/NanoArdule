@@ -29,7 +29,6 @@ from typing import List, Callable, Optional, Tuple
 import os
 import time
 import heapq
-from enum import Enum
 
 # Optional dependency (for StepSeq live pad input)
 try:
@@ -485,16 +484,11 @@ def stepseq_mode(
     stdscr.clear()
     stdscr.refresh()
 
-    # --- StepSeq live input state (MVP-1 -> v3.0a Phase 3) ---
-    # Record state machine:
-    #   OFF -> READY (armed) -> COUNTIN -> RECORDING
-    class RecState(Enum):
-        OFF = 0
-        READY = 1
-        COUNTIN = 2
-        RECORDING = 3
-
-    rec_state = RecState.OFF
+    # --- StepSeq live input state (MVP-1) ---
+    # REC armed: when ON, incoming MIDI NoteOn will stamp into current cursor step.
+    rec_armed = False
+    kbd_pad_mode = False  # When True, qwer/asdf/zxcv/1234 act as drum pads (lowercase);
+                          # keep commands accessible via uppercase (Q/W/A/C/R, etc.).
     # Manual pad input must NOT auto-advance the cursor.
     advance_step_on_hit = False
     midi_in = _open_stepseq_midi_input()
@@ -577,17 +571,7 @@ def stepseq_mode(
     cur_step = 0
     # One page = one bar (2-bar patterns only)
     page_size = int(getattr(meta, "steps_per_bar", 16) or 16)  # 12 / 16 / 24
-    # v3.0a Transport (Phase 2): separate viewBar vs playBar
-    # - view_bar: editing/view context (drives the visible bar/page)
-    # - play_bar: playback context (derived from play_step while playing)
-    # - queued_view_bar: requested view bar switch, applied ONLY at bar boundary
-    view_bar = 0
-    play_bar = 0
-    queued_view_bar = None  # type: Optional[int]
-
-    # Keep legacy variable name 'page' as an alias of view_bar for minimal change.
-    page = view_bar
-
+    page = 0  # 0 = bar1, 1 = bar2
 
     # Enter key will write notes using this accent level (1=SOFT, 2=MEDIUM, 3=STRONG)
     enter_accent_level = 2
@@ -640,20 +624,15 @@ def stepseq_mode(
     countin_step = 0
 
 
-    # Metronome / count-in click notes (GM drum map)
-    # NOTE:
-    # - Keep count-in and metronome clicks distinct so the performer can immediately tell
-    #   "count-in" (record is about to start) from "metronome" (time reference).
-    # - Both are sent on meta.channel (typically CH10 for drums).
-    #
-    # GM note refs (common):
-    #   37 = Side Stick / Rim
-    #   76 = High Wood Block
-    COUNTIN_NOTE = 37  # Count-in click: Side Stick (clear, not too sharp)
-    METRO_NOTE   = 76  # Metronome click: High Wood Block (user preference)
-
-    CLICK_VEL_STRONG = 100  # downbeat
-    CLICK_VEL_WEAK   = 60   # other beats
+    # Click voices (v3.0a)
+    # English note: use different percussion notes for COUNT-IN vs METRONOME.
+    # - Count-in (pre-roll) uses Closed Hi-Hat to clearly signal "get ready".
+    # - Metronome during PLAY/RECORDING uses High Wood Block to avoid confusion.
+    # To tune later, change only these two constants.
+    COUNTIN_CLICK_NOTE = 42  # GM CH10: Closed Hi-Hat
+    METRO_CLICK_NOTE   = 76  # GM CH10: High Wood Block
+    CLICK_VEL_STRONG = 100
+    CLICK_VEL_WEAK = 60
 
     beats_per_bar = 4
     spb_local = int(getattr(meta, "steps_per_bar", 16) or 16)
@@ -712,6 +691,58 @@ def stepseq_mode(
         44: ("PH", "HH_PED"),
     }
 
+
+    # ------------------------------------------------------------------
+    # Keyboard-as-pad mapping (v3.0a)
+    # ------------------------------------------------------------------
+    # Purpose:
+    #   Allow a subset of the computer keyboard to behave like a 4x4 pad grid,
+    #   producing the same "hit" pipeline as external pads.
+    #
+    # Mapping (user request):
+    #   1 -> RIM (37)        2 -> SHAKR (82)     3 -> WBLK_H (76)   4 -> SPLASH (55)
+    #   q -> CLAP (39)       w -> TAMB (54)      e -> COWBL (56)    r -> TOM_H (50)
+    #   a -> CRASH (49)      s -> TOM_M (47)     d -> TOM_L (45)    f -> RIDE (51)
+    #   z -> KICK (36)       x -> SNARE (38)     c -> HH_CL (42)    v -> HH_OP (46)
+    #
+    # Default velocity:
+    #   Use the ADT v2.2a "X" level (MEDIUM = level 2). If you want a different feel,
+    #   change DEFAULT_KBD_PAD_LEVEL (1='-', 2='X', 3='O') or bypass level_to_vel().
+    # ------------------------------------------------------------
+    # Keyboard-as-pad mapping (4x4).
+    # NOTE: Use *lowercase* letter keys only to avoid collisions with command keys
+    # like 'R' (Record Arm). If you want Shift-based velocity later, handle it
+    # explicitly rather than adding uppercase keys here.
+    #
+    # Key -> GM drum note number mapping (user-defined):
+    #   1: RIM(37)   2: SHAKER(82)  3: HIGH WOOD BLOCK(76)  4: SPLASH(55)
+    #   q: CLAP(39)  w: TAMB(54)    e: COWBELL(56)          r: TOM_H(50)
+    #   a: CRASH(49) s: TOM_M(47)   d: TOM_L(45)            f: RIDE(51)
+    #   z: KICK(36)  x: SNARE(38)   c: HH_CL(42)            v: HH_OP(46)
+    # ------------------------------------------------------------
+    KEYBOARD_PAD_NOTE_MAP = {
+        ord('1'): 37,  # RIM
+        ord('2'): 82,  # SHAKER
+        ord('3'): 76,  # HIGH WOOD BLOCK
+        ord('4'): 55,  # SPLASH
+        ord('q'): 39,  # CLAP
+        ord('w'): 54,  # TAMB
+        ord('e'): 56,  # COWBELL
+        ord('r'): 50,  # TOM HIGH
+        ord('a'): 49,  # CRASH
+        ord('s'): 47,  # TOM MID
+        ord('d'): 45,  # TOM LOW
+        ord('f'): 51,  # RIDE
+        ord('z'): 36,  # KICK
+        ord('x'): 38,  # SNARE
+        ord('c'): 42,  # HH CLOSED
+        ord('v'): 46,  # HH OPEN
+    }
+    DEFAULT_KBD_PAD_LEVEL = 2  # 'X' (medium). Adjust here if you want '-' or 'O' as default.
+    DEFAULT_KBD_PAD_LEVEL = 2  # 'X' (medium)
+    DEFAULT_KBD_PAD_VEL = level_to_vel(DEFAULT_KBD_PAD_LEVEL)
+
+
     def _preview_note(note: int, vel: int):
         """Play a very short audition note (if MIDI OUT is available)."""
         # During PLAY, monitoring/audition causes double-trigger with sequencer playback.
@@ -760,33 +791,21 @@ def stepseq_mode(
     def _pick_input_step(now_t: float) -> int:
         """Choose the best target step for an input hit.
 
-        Phase 3: when PLAYing, stamping must follow the playhead (play_step),
-        NOT the edit cursor (cur_step). We still apply a constant offset and
-        symmetric snap window around the step boundary.
-
-        - Apply RECORD_OFFSET_MS (negative stamps slightly earlier)
-        - If the adjusted hit falls near the step start, snap to previous
-        - If it falls near the step end, snap to next
+        v3.0a policy:
+        - When PLAYing/RECORDING, the playhead (play_step) is authoritative for stamping.
+          We still apply a small snap window + constant offset to reduce boundary jitter.
+        - When not playing, fall back to the edit cursor (cur_step). (Note: by policy we
+          normally don't stamp in OFF/ARM/COUNTIN anyway, but keep this safe.)
         """
-        # When not playing, target the current edit cursor position (absolute column).
         if not playing:
-            try:
-                return int(page) * int(page_size) + int(cur_step)
-            except Exception:
-                return int(cur_step)
-
-        # When playing, target the current playhead step.
-        try:
-            base_step = int(play_step)
-        except Exception:
-            base_step = 0
+            return int(cur_step)
 
         try:
             sp = float(sec_per_step)
             if sp <= 0:
-                return base_step
+                return int(play_step)
 
-            # Step start time for the *current* playhead step.
+            # Step start time for the *current playhead* step.
             step_start_t = float(next_step_t) - sp
 
             # Apply constant offset to compensate for consistent latency.
@@ -800,40 +819,13 @@ def stepseq_mode(
 
             # Snap logic (symmetric): near start => previous, near end => next.
             if phase < snap:
-                return (base_step - 1) % int(grid.steps)
+                return (int(play_step) - 1) % int(grid.steps)
             if phase > (sp - snap):
-                return (base_step + 1) % int(grid.steps)
+                return (int(play_step) + 1) % int(grid.steps)
         except Exception:
             pass
 
-        return base_step
-
-        try:
-            sp = float(sec_per_step)
-            if sp <= 0:
-                return int(cur_step)
-
-            # Step start time for the *current* step (cur_step).
-            step_start_t = float(next_step_t) - sp
-
-            # Apply constant offset to compensate for consistent latency.
-            t_eff = float(now_t) + (float(RECORD_OFFSET_MS) / 1000.0)
-
-            # Phase relative to current step start (can be <0 or >sp due to offset).
-            phase = t_eff - step_start_t
-
-            # Clamp snap window to < half-step to avoid pathological snapping.
-            snap = min(float(SNAP_MS) / 1000.0, sp * 0.45)
-
-            # Snap logic (symmetric): near start => previous, near end => next.
-            if phase < snap:
-                return (int(cur_step) - 1) % int(grid.steps)
-            if phase > (sp - snap):
-                return (int(cur_step) + 1) % int(grid.steps)
-        except Exception:
-            pass
-
-        return int(cur_step)
+        return int(play_step)
 
 
     def _send_note_on(note: int, vel: int) -> bool:
@@ -865,7 +857,7 @@ def stepseq_mode(
             _send_note_off(n)
 
     def _tick_playback(now_t: float) -> None:
-        nonlocal play_step, next_step_t, loop_start, loop_end, countin_remaining_steps, countin_step, view_bar, play_bar, queued_view_bar, page, rec_state
+        nonlocal play_step, next_step_t, cur_step, page, loop_start, loop_end, countin_remaining_steps, countin_step
 
         if (not playing) or (now_t < next_step_t):
             return
@@ -883,19 +875,21 @@ def stepseq_mode(
                 elif beat_len is not None and (countin_step % beat_len) == 0:
                     vel = CLICK_VEL_WEAK
                 if vel is not None:
-                    if _send_note_on(COUNTIN_NOTE, int(vel)):
-                        _schedule_note_off(COUNTIN_NOTE, now_t + gate_sec)
+                    if _send_note_on(COUNTIN_CLICK_NOTE, int(vel)):
+                        _schedule_note_off(COUNTIN_CLICK_NOTE, now_t + gate_sec)
 
             countin_remaining_steps -= 1
             countin_step += 1
 
-            # During count-in, keep editing cursor/view untouched (click-only).
+            # Keep cursor parked at loop start during count-in (stable visual anchor)
+            cur_step = int(loop_start)
+            page = cur_step // page_size
 
             # When count-in finishes, start actual loop at loop_start
             if countin_remaining_steps <= 0:
                 play_step = int(loop_start)
-                if rec_state == RecState.COUNTIN:
-                    rec_state = RecState.RECORDING
+                cur_step = int(loop_start)
+                page = cur_step // page_size
 
             # Schedule next tick (drift-safe)
             next_step_t = next_step_t + sec_per_step
@@ -926,21 +920,15 @@ def stepseq_mode(
                 elif beat_len is not None and (play_step % beat_len == 0):
                     vel = CLICK_VEL_WEAK
                 if vel is not None:
-                    if _send_note_on(METRO_NOTE, int(vel)):
-                        _schedule_note_off(METRO_NOTE, now_t + gate_sec)
+                    if _send_note_on(METRO_CLICK_NOTE, int(vel)):
+                        _schedule_note_off(METRO_CLICK_NOTE, now_t + gate_sec)
 
-        # Update play_bar from the *current* playhead step (the one we just fired)
-        try:
-            play_bar = int(play_step) // int(spb_local)
-        except Exception:
-            play_bar = 0
-
-        # Do NOT force the edit cursor/view to follow playback in v3.0a Phase 2.
-        # (view_bar/page is user-controlled; bar switches are applied only at bar boundary.)
+        # Keep cursor synced to the *current* playhead step (the one we just fired)
+        cur_step = int(play_step)
+        page = cur_step // page_size
 
         # Advance playhead for the next tick (loop current bar by default)
-        prev_step = int(play_step)
-        play_step = prev_step + 1
+        play_step = int(play_step) + 1
         if loop_bar:
             if play_step >= loop_end:
                 play_step = int(loop_start)
@@ -948,17 +936,7 @@ def stepseq_mode(
             if play_step >= int(grid.steps):
                 play_step = 0
 
-        # Bar boundary hook: apply queued view-bar switch ONLY here.
-        # We define "bar boundary" as the moment we have advanced into step 0 of a bar.
-        if (play_step % int(spb_local)) == 0:
-            if queued_view_bar is not None:
-                try:
-                    view_bar = int(queued_view_bar)
-                except Exception:
-                    view_bar = int(view_bar)
-                queued_view_bar = None
-                page = int(view_bar)  # keep legacy alias
-# Schedule next tick (drift-safe)
+        # Schedule next tick (drift-safe)
         next_step_t = next_step_t + sec_per_step
         if next_step_t < now_t - sec_per_step:
             next_step_t = now_t + sec_per_step
@@ -1010,72 +988,18 @@ def stepseq_mode(
 
         return -1
 
-    def _bar_count():
-
-        # v3.0a Phase 2: prefer explicit pattern/meta bar count when available.
-
-        try:
-
-            b = int(getattr(meta, "bars", 0) or 0)
-
-            if b > 0:
-
-                return b
-
-        except Exception:
-
-            pass
-
-        # Fallback: derive from grid.steps and page_size.
-
-        try:
-
-            ps = int(page_size) if int(page_size) > 0 else 16
-
-            st = int(getattr(grid, "steps", 0) or 0)
-
-            if st > 0 and ps > 0:
-
-                return max(1, (st + ps - 1) // ps)
-
-        except Exception:
-
-            pass
-
-        return 1
-
-    
-
-    def _max_view_bar():
-
-        return max(0, _bar_count() - 1)
-
-
     def clamp_cursor():
-        nonlocal cur_lane, cur_step, page, view_bar, queued_view_bar
+        nonlocal cur_lane, cur_step, page
         if cur_lane < 0:
             cur_lane = 0
         if cur_lane >= len(grid.lanes):
             cur_lane = len(grid.lanes) - 1
-
-        # Clamp view_bar within pattern bars
-        max_page = _max_view_bar()
-        if view_bar < 0:
-            view_bar = 0
-        if view_bar > max_page:
-            view_bar = max_page
-
-        # Keep legacy alias
-        page = int(view_bar)
-
-        # Clamp cursor step within the currently visible bar (view_bar)
-        bar_start = int(view_bar) * int(page_size)
-        bar_end = min(int(grid.steps), bar_start + int(page_size)) - 1
-        if cur_step < bar_start:
-            cur_step = bar_start
-        if cur_step > bar_end:
-            cur_step = bar_end
-
+        if cur_step < 0:
+            cur_step = 0
+        if cur_step >= grid.steps:
+            cur_step = grid.steps - 1
+        # 2-bar patterns: page is bar index (0 or 1)
+        page = cur_step // page_size
 
     def draw():
         max_y, max_x = stdscr.getmaxyx()
@@ -1086,12 +1010,7 @@ def stepseq_mode(
             stdscr.border()
         except curses.error:
             pass
-        rec_txt = (
-            "REC" if rec_state == RecState.RECORDING else
-            "CIN" if rec_state == RecState.COUNTIN else
-            "ARM" if rec_state == RecState.READY else
-            "OFF"
-        )
+        rec_txt = ("REC" if (rec_armed and playing) else ("ARMED" if rec_armed else "STBY"))  # UI: STBY/ARMED/REC
         mod_txt = "*" if modified else " "
 
         # Header line 1: short and stable (no wrapping)
@@ -1102,11 +1021,10 @@ def stepseq_mode(
             name_txt = name_txt[:max_name-1] + "…"
 
         header1 = (
-            "[STEP]{mod} {name}  BAR={bar}/{bars}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  {rec}"
+            "[STEP]{mod} {name}  CH={ch}  LEN={bars}bar  STEPS={steps}  BPM={bpm}  {rec}"
         ).format(
             mod=mod_txt,
             name=name_txt,
-            bar=int(page) + 1,
             ch=meta.channel + 1,
             bars=meta.bars,
             steps=grid.steps,
@@ -1122,10 +1040,9 @@ def stepseq_mode(
         metro_txt = "MET:Y"    if metro_on    else "MET:N"
         loop_txt  = "LOOP:BAR" if loop_bar    else "LOOP:FULL"
         cin_txt   = "CIN" if (countin_remaining_steps > 0) else ""
-        view_txt  = f"VIEW:{int(page)+1}/{int(getattr(meta,'bars',1) or 1)}"
-        q_txt     = (f"Q:{int(queued_view_bar)+1}" if (playing and queued_view_bar is not None) else "")
+        kgrid_txt  = "KGRID:ON LOCK16" if kbd_pad_mode else "KGRID:OFF"
 
-        status2 = "  ".join([t for t in [in_txt, out_txt, pad_txt, play_txt, metro_txt, loop_txt, view_txt, q_txt, cin_txt] if t]).strip()
+        status2 = "  ".join([in_txt, out_txt, pad_txt, play_txt, metro_txt, loop_txt, cin_txt, kgrid_txt]).strip()
 
         header_w = max(1, max_x - 4)
         y = 1
@@ -1134,8 +1051,33 @@ def stepseq_mode(
         except curses.error:
             pass
         y += 1
+
+        # Status line 2 (with optional reverse-video badge for KGRID lock)
         try:
-            stdscr.addnstr(y, 2, status2.ljust(header_w), header_w)
+            # Clear the line first (stable layout)
+            stdscr.addnstr(y, 2, (" " * header_w), header_w)
+
+            parts = [in_txt, out_txt, pad_txt, play_txt, metro_txt, loop_txt]
+            if cin_txt:
+                parts.append(cin_txt)
+
+            prefix = "  ".join([p for p in parts if p]).strip()
+            x = 2
+            if prefix:
+                stdscr.addnstr(y, x, prefix, header_w)
+                x += len(prefix)
+
+            # Separator before KGRID segment (keep identical visual spacing to the old join)
+            sep = "  " if (prefix and (x - 2) < header_w) else ""
+            if sep:
+                stdscr.addnstr(y, x, sep, max(0, header_w - (x - 2)))
+                x += len(sep)
+
+            # KGRID segment (reverse video only when ON)
+            kseg = "KGRID:ON LOCK16" if kbd_pad_mode else "KGRID:OFF"
+            attr = curses.A_REVERSE if kbd_pad_mode else 0
+            if (x - 2) < header_w:
+                stdscr.addnstr(y, x, kseg, max(0, header_w - (x - 2)), attr)
         except curses.error:
             pass
 
@@ -1158,14 +1100,13 @@ def stepseq_mode(
 
         col = col0
         for s in range(start_step, end_step):
-            # Step labels are global (01..N), so bar 2 shows 17..32 (or triplet-aware 13..24).
-            label_width = 3 if int(grid.steps) >= 100 else 2
-            label = ("%0" + str(label_width) + "d") % (s + 1)
+            # Step labels are global (01..N) so bar paging shows 17..32, etc.
+            label = "%02d" % (s + 1)
             try:
                 stdscr.addnstr(y_step, col, label, 2)
             except curses.error:
                 pass
-            col += (label_width + 1)
+            col += 3
 
         # Beat marker row (quarter-note based)
         beat_gap = 4
@@ -1190,10 +1131,10 @@ def stepseq_mode(
                 stdscr.addnstr(y_beat, col, " " + mark, 2)
             except curses.error:
                 pass
-            col += (3 if int(grid.steps) < 100 else 4)
+            col += 3
             local_idx += 1
 
-        footer_full = "Move: arrows/h/j/k/l  Tab/Shift+Tab:step  Home:bar start  Enter:write accent / toggle off  A:accent  J;/K':vel  r:REC(arm)  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play/stop  b:loop  m:metro  w:save  Backspace/Delete:clear last hit-group  q/Esc:exit"
+        footer_full = "Move: arrows/h/j/k/l  Home:bar start  Enter:write accent / toggle off  A:accent  J;/K':vel  r:REC(arm)  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play/stop  b:loop  m:metro  w:save  Backspace/Delete:clear last hit-group  q/Esc:exit"
         footer_w = max(1, max_x - 4)
         footer_lines = textwrap.wrap(footer_full, width=footer_w, break_long_words=False, break_on_hyphens=False) or [""]
 
@@ -1409,6 +1350,30 @@ def stepseq_mode(
         if key == curses.KEY_RESIZE:
             draw()
             continue
+        # Cursor movement: support both arrow keys and Vim-style hjkl.
+        # Keeping this early in the key loop makes navigation responsive and
+        # avoids accidental interactions with other modes.
+        if key in (curses.KEY_LEFT, ord('h')):
+            cur_step -= 1
+            clamp_cursor()
+            draw()
+            continue
+        if key in (curses.KEY_RIGHT, ord('l')):
+            cur_step += 1
+            clamp_cursor()
+            draw()
+            continue
+        if key in (curses.KEY_UP, ord('k')):
+            cur_lane -= 1
+            clamp_cursor()
+            draw()
+            continue
+        if key in (curses.KEY_DOWN, ord('j')):
+            cur_lane += 1
+            clamp_cursor()
+            draw()
+            continue
+
 
         now_t = time.monotonic()
         _process_pending_note_off(now_t)
@@ -1429,8 +1394,10 @@ def stepseq_mode(
                         continue
 
                     note = int(getattr(msg, "note", -1))
-                    if rec_state == RecState.OFF:
-                        # v3.0a Phase 3: REC OFF is preview-only (no grid writes).
+                    if not rec_armed:
+                        # Policy (v3.0a stabilization):
+                        # - When REC is NOT armed, pad/controller input is preview-only.
+                        # - Never stamp into the grid in STOP/PLAY; keep existing edit flow stable.
                         now_t = time.monotonic()
                         _monitor_hit(note, vel, now_t)
                         _set_status(f"PREVIEW NOTE {note}  vel={vel}", duration_sec=0.6)
@@ -1438,96 +1405,6 @@ def stepseq_mode(
                         continue
 
                     # REC armed: allow stamping.
-# Manual Pad Input Mode MVP-1 (NO timing, NO quantize, NO autoplay):
-                        # - Only when PLAY=OFF, REC=OFF, and not in count-in
-                        # - Stamp into current cursor column (cur_step), lane determined by pad note mapping
-                        # - Always overwrite (no max-velocity accumulation)
-                        manual_ok = (not playing) and (countin_remaining_steps <= 0)
-                        now_t = time.monotonic()
-
-                        if manual_ok:
-                            # If note is not in lanes yet, allow only if an empty reassignable lane exists (core excluded).
-                            lane_exists = any(int(getattr(ln, "note", -9999)) == note for ln in grid.lanes)
-                            if (not lane_exists) and (not _has_empty_reassignable_lane()):
-                                _monitor_hit(note, vel, now_t)
-                                _set_status(f"NO EMPTY SLOT (NOTE {note})", duration_sec=1.2)
-                                midi_hit = True
-                                continue
-
-                            lane_idx = _ensure_lane_for_note(note)
-                            if lane_idx < 0:
-                                _monitor_hit(note, vel, now_t)
-                                _set_status(f"NO EMPTY SLOT (NOTE {note})", duration_sec=1.2)
-                                midi_hit = True
-                                continue
-
-                            # Velocity -> 3-level symbol mapping (fixed thresholds)
-                            if vel <= 31:
-                                lvl = 1
-                            elif vel <= 79:
-                                lvl = 2
-                            else:
-                                lvl = 3
-
-                            # Manual pad input: record exactly at the current cursor step.
-                            # Input is limited to the *currently visible bar* (page).
-                            bar_start = int(page) * int(spb_local)
-                            bar_end = min(int(grid.steps), bar_start + int(spb_local)) - 1
-                            col = int(cur_step)
-                            if col < bar_start:
-                                col = bar_start
-                            if col > bar_end:
-                                col = bar_end
-
-                            cell = grid.lanes[lane_idx].cells[col]
-                            cell.on = True
-                            cell.vel = level_to_vel(lvl)  # overwrite (no accumulation)
-                            modified = True
-
-                            # Update "simultaneous" group for chord-like delete.
-                            # If hits arrive within 0.10s and land on the same step, treat as one group.
-                            try:
-                                if (col == int(last_hit_group_step)) and ((now_t - float(last_hit_group_t)) <= 0.10):
-                                    last_hit_group.append((int(lane_idx), int(col)))
-                                else:
-                                    last_hit_group = [(int(lane_idx), int(col))]
-                                    last_hit_group_step = int(col)
-                                last_hit_group_t = float(now_t)
-                            except Exception:
-                                last_hit_group = [(int(lane_idx), int(col))]
-                                last_hit_group_step = int(col)
-                                last_hit_group_t = float(now_t)
-
-                            # Immediate one-shot preview (separate from recording logic)
-                            _monitor_hit(note, vel, now_t)
-
-                            # UI flash feedback
-                            last_pad_hit_lane = lane_idx
-                            last_pad_hit_step = col
-                            last_pad_hit_t = now_t
-
-                            _set_status(f"PAD NOTE {note} -> {grid.lanes[lane_idx].name}  @STEP {col+1}", duration_sec=0.6)
-                            midi_hit = True
-                            continue
-
-                        # Not in manual mode: preview-only
-                        _monitor_hit(note, vel, now_t)
-                        _set_status(f"PREVIEW NOTE {note}  vel={vel}", duration_sec=0.6)
-                        midi_hit = True
-                        continue
-
-                    # REC armed: allow stamping.
-                    # v3.0a Phase 3: only stamp while RECORDING.
-                    if rec_state != RecState.RECORDING:
-                        now_t = time.monotonic()
-                        _monitor_hit(note, vel, now_t)
-                        if rec_state == RecState.COUNTIN:
-                            _set_status("COUNT-IN (no recording)", duration_sec=0.6)
-                        else:
-                            _set_status("ARMED (not recording)", duration_sec=0.6)
-                        midi_hit = True
-                        continue
-
                     # During count-in, do NOT stamp; preview/monitor only.
                     if countin_remaining_steps > 0:
                         now_t = time.monotonic()
@@ -1560,7 +1437,7 @@ def stepseq_mode(
                     cell = grid.lanes[lane_idx].cells[target_step]
                     _monitor_hit(note, vel, now_t)
                     cell.on = True
-                    cell.vel = int(vel)
+                    cell.vel = max(int(getattr(cell, "vel", 0) or 0), int(vel))
                     modified = True
                     midi_hit = True
                     # Manual/REC MIDI hits do not auto-advance cursor (explicit key only)
@@ -1583,130 +1460,106 @@ def stepseq_mode(
                 time.sleep(0.005)
             continue
 
-        if key in (curses.KEY_UP, ord("k")):
-            cur_lane -= 1
-        elif key in (curses.KEY_DOWN, ord("j")):
-            cur_lane += 1
-        elif key in (curses.KEY_LEFT, ord("h")):
-            bar_start = int(page) * int(page_size)
-            bar_end = min(int(grid.steps), bar_start + int(page_size)) - 1
-            if cur_step <= bar_start:
-                cur_step = bar_end
-            else:
-                cur_step -= 1
-        elif key in (curses.KEY_RIGHT, ord("l")):
-            bar_start = int(page) * int(page_size)
-            bar_end = min(int(grid.steps), bar_start + int(page_size)) - 1
-            if cur_step >= bar_end:
-                cur_step = bar_start
-            else:
-                cur_step += 1
-        elif key in (curses.KEY_HOME, 262, ord("0")):
-            # Home: go to first step of the currently visible bar
-            cur_step = int(page) * int(page_size)
-        elif key in (curses.KEY_BACKSPACE, 127, 8, 263):  # Backspace (varies by terminal)
-            # Delete the last "simultaneous" hit group (chord-like pad hits) if available.
-            did = False
-            if last_hit_group and last_hit_group_step >= 0:
-                for li, st in list(last_hit_group):
-                    if 0 <= li < len(grid.lanes) and 0 <= st < grid.steps:
-                        c = grid.lanes[li].cells[st]
-                        if c.on or (getattr(c, "vel", 0) or 0):
-                            c.on = False
-                            c.vel = 0
-                            did = True
-                last_hit_group = []
-                last_hit_group_step = -1
-            if did:
-                modified = True
-            else:
-                # Fallback: clear cursor cell
-                lane = grid.lanes[cur_lane]
-                cell = lane.cells[cur_step]
-                if cell.on or (getattr(cell, "vel", 0) or 0):
-                    cell.on = False
-                    cell.vel = 0
-                    modified = True
-        elif key in (curses.KEY_DC, 330):  # Delete (varies by terminal)
-            # Same behavior as Backspace.
-            did = False
-            if last_hit_group and last_hit_group_step >= 0:
-                for li, st in list(last_hit_group):
-                    if 0 <= li < len(grid.lanes) and 0 <= st < grid.steps:
-                        c = grid.lanes[li].cells[st]
-                        if c.on or (getattr(c, "vel", 0) or 0):
-                            c.on = False
-                            c.vel = 0
-                            did = True
-                last_hit_group = []
-                last_hit_group_step = -1
-            if did:
-                modified = True
-            else:
-                lane = grid.lanes[cur_lane]
-                cell = lane.cells[cur_step]
-                if cell.on or (getattr(cell, "vel", 0) or 0):
-                    cell.on = False
-                    cell.vel = 0
-                    modified = True
-        elif key in (ord("\t"),):  # Tab: advance step (within visible bar)
-            bar_start = int(page) * int(page_size)
-            bar_end = min(int(grid.steps), bar_start + int(page_size)) - 1
-            if cur_step >= bar_end:
-                cur_step = bar_start
-            else:
-                cur_step += 1
-        elif key in (curses.KEY_BTAB,):  # Shift+Tab: back step (within visible bar)
-            bar_start = int(page) * int(page_size)
-            bar_end = min(int(grid.steps), bar_start + int(page_size)) - 1
-            if cur_step <= bar_start:
-                cur_step = bar_end
-            else:
-                cur_step -= 1
-        elif key == ord("r"):
-            # v3.0a Phase 3: toggle record arm (OFF <-> READY).
-            # If pressed during COUNTIN/RECORDING, disarm immediately.
-            if rec_state == RecState.OFF:
-                rec_state = RecState.READY
-                _set_status("REC ARM", duration_sec=0.6)
-            else:
-                rec_state = RecState.OFF
-                countin_remaining_steps = 0
-                countin_step = 0
-                _set_status("REC OFF", duration_sec=0.6)
+        # ------------------------------------------------------------
+        # ------------------------------------------------------------
+        # Keyboard-as-pad (optional mode)
+        #
+        # Toggle with 'p': when ON, the 4x4 key grid acts like drum pads.
+        # Lowercase keys become pad hits; keep commands via uppercase keys.
+        # This is intentionally conservative to avoid collisions with existing
+        # single-key commands (q=quit, w=write/save, r=rec arm, etc.).
+        # ------------------------------------------------------------
+        if key in (ord('p'), ord('P')):
+            kbd_pad_mode = not kbd_pad_mode
+            _set_status('KBD PAD MODE ON' if kbd_pad_mode else 'KBD PAD MODE OFF', duration_sec=0.8)
+            draw()
+            continue
+
+        kbd_note = KEYBOARD_PAD_NOTE_MAP.get(key) if kbd_pad_mode else None
+        if kbd_note is not None:
+            now_t = time.monotonic()
+            # Default velocity for keyboard pads: use StepSeq level symbol 'X' (medium).
+            vel = int(level_to_vel(int(DEFAULT_KBD_PAD_LEVEL)))
+
+            # Keyboard pads follow the same rules as real pads:
+            # - Not armed OR not playing: preview only (no grid writes)
+            # - During count-in: preview only (no grid writes)
+            # - Armed + playing + count-in finished: stamp into the intended step
+            if (not rec_armed) or (not playing):
+                _monitor_hit(kbd_note, vel, now_t)
+                _set_status(f"KBD PREVIEW NOTE {kbd_note}  vel={vel}", duration_sec=0.6)
+                draw()
+                continue
+
+            if countin_remaining_steps > 0:
+                _monitor_hit(kbd_note, vel, now_t)
+                _set_status("COUNT-IN (no recording)", duration_sec=0.6)
+                draw()
+                continue
+
+            # Ensure a lane exists for this note (use reassignable lanes only; core excluded).
+            lane_exists = any(int(getattr(ln, 'note', -9999)) == int(kbd_note) for ln in grid.lanes)
+            if (not lane_exists) and (not _has_empty_reassignable_lane()):
+                _monitor_hit(kbd_note, vel, now_t)
+                _set_status(f"NO EMPTY SLOT (NOTE {kbd_note})", duration_sec=1.2)
+                draw()
+                continue
+
+            lane_idx = _ensure_lane_for_note(int(kbd_note))
+            if lane_idx < 0:
+                _monitor_hit(kbd_note, vel, now_t)
+                _set_status(f"NO EMPTY SLOT (NOTE {kbd_note})", duration_sec=1.2)
+                draw()
+                continue
+
+            # Stamp at the same step-selection rule as MIDI pads (see _pick_input_step).
+            target_step = _pick_input_step(now_t)
+            cell = grid.lanes[int(lane_idx)].cells[int(target_step)]
+            _monitor_hit(kbd_note, vel, now_t)
+            cell.on = True
+            # Overwrite (Replace policy) rather than accumulation for keyboard pads.
+            cell.vel = int(vel)
+            modified = True
+
+            # UI flash feedback (same visuals as manual pad input).
+            last_pad_hit_lane = int(lane_idx)
+            last_pad_hit_step = int(target_step)
+            last_pad_hit_t = float(now_t)
+
+            _set_status(f"KBD NOTE {kbd_note}  @STEP {int(target_step)+1}", duration_sec=0.6)
+            draw()
+            continue
+
+        elif (key == ord('r') and (not kbd_pad_mode)) or (key == ord('R')):
+            # StepSeq live input: toggle REC(arm)
+            rec_armed = not rec_armed
 
         elif key == ord("["):
-            # v3.0a Phase 2: viewBar switching is user-driven; during PLAY it is queued and applied at bar boundary.
-            if playing:
-                try:
-                    qb = max(0, int(view_bar) - 1)
-                except Exception:
-                    qb = 0
-                queued_view_bar = qb
-                _set_status(f"QUEUED VIEW BAR {qb+1}", duration_sec=0.6)
+            # previous page (wrap)
+            max_page = (grid.steps - 1) // page_size
+            if page > 0:
+                page -= 1
             else:
-                if view_bar > 0:
-                    view_bar -= 1
-                queued_view_bar = None
-                page = int(view_bar)
-                clamp_cursor()
+                page = max_page
+            start = page * page_size
+            end = min(start + page_size, grid.steps) - 1
+            if cur_step < start:
+                cur_step = start
+            if cur_step > end:
+                cur_step = end
         elif key == ord("]"):
-            if playing:
-                try:
-                    max_page = _max_view_bar()
-                    qb = min(max_page, int(view_bar) + 1)
-                except Exception:
-                    qb = int(view_bar)
-                queued_view_bar = qb
-                _set_status(f"QUEUED VIEW BAR {qb+1}", duration_sec=0.6)
+            # next page (wrap)
+            max_page = (grid.steps - 1) // page_size
+            if page < max_page:
+                page += 1
             else:
-                max_page = _max_view_bar()
-                if view_bar < max_page:
-                    view_bar += 1
-                queued_view_bar = None
-                page = int(view_bar)
-                clamp_cursor()
-
+                page = 0
+            start = page * page_size
+            end = min(start + page_size, grid.steps) - 1
+            if cur_step < start:
+                cur_step = start
+            if cur_step > end:
+                cur_step = end
 
         elif key == ord("\n"):  # Enter
             lane = grid.lanes[cur_lane]
@@ -1723,7 +1576,7 @@ def stepseq_mode(
                 _preview_note(lane.note, cell.vel)
             modified = True
 
-        elif key in (ord('a'), ord('A')):  # Shift+A: cycle Enter input accent (SOFT -> MEDIUM -> STRONG)
+        elif (key == ord('a') and (not kbd_pad_mode)) or (key == ord('A')):  # A: cycle Enter input accent
             if enter_accent_level == 1:
                 enter_accent_level = 2
             elif enter_accent_level == 2:
@@ -1807,7 +1660,7 @@ def stepseq_mode(
                     lane.cells[cur_step].vel = 0
                 modified = True
 
-        elif key == ord("c"):
+        elif (key == ord('c') and (not kbd_pad_mode)) or (key == ord('C')):
             # Copy bar1 -> bar2 (page_size steps) when bar2 exists
             if grid.steps >= 2 * page_size:
                 for lane in grid.lanes:
@@ -1838,13 +1691,13 @@ def stepseq_mode(
                 _set_status("LOOP FULL", duration_sec=0.7)
 
         elif key == 32:  # Space
-            # v3.0a: toggle playback loop (non-blocking), default loop is the *current bar*.
+            # MVP-2.6: toggle playback loop (non-blocking), default loop is the *current bar*.
             playing = not playing
             if playing:
                 # Auto loop policy:
-                # - Default: FULL loop
-                # - If REC is armed (READY) when playback starts: BAR loop unless user explicitly toggled with 'b'
-                if (rec_state == RecState.READY) and (not loop_bar_user_override):
+                # - Default (REC OFF): FULL loop
+                # - When REC is armed and playback starts: BAR loop (unless user explicitly toggled with 'b')
+                if rec_armed and (not loop_bar_user_override):
                     loop_bar = True
 
                 # Determine loop scope
@@ -1861,19 +1714,13 @@ def stepseq_mode(
                     loop_end = int(grid.steps)
 
                 play_step = int(loop_start)
+                cur_step = int(loop_start)
+                page = cur_step // page_size
 
-                # Record state transition on PLAY start
-                # - If REC is armed (READY): run 1-bar count-in then enter RECORDING
-                # - Otherwise: plain PLAY
-                if rec_state == RecState.READY:
-                    if COUNTIN_BARS > 0:
-                        countin_remaining_steps = int(spb_local) * int(COUNTIN_BARS)
-                        countin_step = 0
-                        rec_state = RecState.COUNTIN
-                    else:
-                        countin_remaining_steps = 0
-                        countin_step = 0
-                        rec_state = RecState.RECORDING
+                # 1-bar count-in when REC is armed (click only; stamping disabled during count-in)
+                if rec_armed and COUNTIN_BARS > 0:
+                    countin_remaining_steps = int(spb_local) * int(COUNTIN_BARS)
+                    countin_step = 0
                 else:
                     countin_remaining_steps = 0
                     countin_step = 0
@@ -1886,7 +1733,7 @@ def stepseq_mode(
                     else:
                         _set_status("PLAY muted (no MIDI OUT)", duration_sec=1.2)
                 else:
-                    if rec_state == RecState.COUNTIN and countin_remaining_steps > 0:
+                    if countin_remaining_steps > 0:
                         _set_status("PLAY (count-in 1bar)", duration_sec=0.9)
                     else:
                         _set_status("PLAY", duration_sec=0.6)
@@ -1898,15 +1745,8 @@ def stepseq_mode(
                         _send_note_off(n)
                 except Exception:
                     pass
-
                 countin_remaining_steps = 0
                 countin_step = 0
-
-                # Record state transition on STOP:
-                # - If we were recording or counting-in, return to READY (armed) so the user can retry quickly.
-                if rec_state in (RecState.COUNTIN, RecState.RECORDING):
-                    rec_state = RecState.READY
-
                 _set_status("STOP", duration_sec=0.6)
 
             # Drain queued keys (esp. Space)
@@ -1919,13 +1759,13 @@ def stepseq_mode(
             except curses.error:
                 pass
 
-        elif key in (ord("w"), ord("W")):
+        elif (key == ord('w') and (not kbd_pad_mode)) or (key == ord('W')):
             saved = True
             baseline_sig = _grid_signature(grid)
             modified = False
             break
 
-        elif key in (ord("q"), ord("Q"), 27):  # q / Q / ESC
+        elif (key == ord('q') and (not kbd_pad_mode)) or (key == ord('Q')) or (key == 27):  # q/Q/ESC
             if modified and not saved:
                 if not confirm_quit():
                     draw()
