@@ -29,6 +29,7 @@ from typing import List, Callable, Optional, Tuple
 import os
 import time
 import heapq
+from enum import Enum
 
 # Optional dependency (for StepSeq live pad input)
 try:
@@ -484,9 +485,16 @@ def stepseq_mode(
     stdscr.clear()
     stdscr.refresh()
 
-    # --- StepSeq live input state (MVP-1) ---
-    # REC armed: when ON, incoming MIDI NoteOn will stamp into current cursor step.
-    rec_armed = False
+    # --- StepSeq live input state (MVP-1 -> v3.0a Phase 3) ---
+    # Record state machine:
+    #   OFF -> READY (armed) -> COUNTIN -> RECORDING
+    class RecState(Enum):
+        OFF = 0
+        READY = 1
+        COUNTIN = 2
+        RECORDING = 3
+
+    rec_state = RecState.OFF
     # Manual pad input must NOT auto-advance the cursor.
     advance_step_on_hit = False
     midi_in = _open_stepseq_midi_input()
@@ -632,10 +640,20 @@ def stepseq_mode(
     countin_step = 0
 
 
-    # Metronome click (GM-ish defaults)
-    CLICK_NOTE = 37  # Rim/Side Stick (works well on GS + many modules)
-    CLICK_VEL_STRONG = 100
-    CLICK_VEL_WEAK = 60
+    # Metronome / count-in click notes (GM drum map)
+    # NOTE:
+    # - Keep count-in and metronome clicks distinct so the performer can immediately tell
+    #   "count-in" (record is about to start) from "metronome" (time reference).
+    # - Both are sent on meta.channel (typically CH10 for drums).
+    #
+    # GM note refs (common):
+    #   37 = Side Stick / Rim
+    #   76 = High Wood Block
+    COUNTIN_NOTE = 37  # Count-in click: Side Stick (clear, not too sharp)
+    METRO_NOTE   = 76  # Metronome click: High Wood Block (user preference)
+
+    CLICK_VEL_STRONG = 100  # downbeat
+    CLICK_VEL_WEAK   = 60   # other beats
 
     beats_per_bar = 4
     spb_local = int(getattr(meta, "steps_per_bar", 16) or 16)
@@ -742,15 +760,53 @@ def stepseq_mode(
     def _pick_input_step(now_t: float) -> int:
         """Choose the best target step for an input hit.
 
-        We treat the grid (step index) as authoritative, but compensate for
-        consistent latency and human timing drift:
+        Phase 3: when PLAYing, stamping must follow the playhead (play_step),
+        NOT the edit cursor (cur_step). We still apply a constant offset and
+        symmetric snap window around the step boundary.
 
         - Apply RECORD_OFFSET_MS (negative stamps slightly earlier)
         - If the adjusted hit falls near the step start, snap to previous
         - If it falls near the step end, snap to next
         """
+        # When not playing, target the current edit cursor position (absolute column).
         if not playing:
-            return int(cur_step)
+            try:
+                return int(page) * int(page_size) + int(cur_step)
+            except Exception:
+                return int(cur_step)
+
+        # When playing, target the current playhead step.
+        try:
+            base_step = int(play_step)
+        except Exception:
+            base_step = 0
+
+        try:
+            sp = float(sec_per_step)
+            if sp <= 0:
+                return base_step
+
+            # Step start time for the *current* playhead step.
+            step_start_t = float(next_step_t) - sp
+
+            # Apply constant offset to compensate for consistent latency.
+            t_eff = float(now_t) + (float(RECORD_OFFSET_MS) / 1000.0)
+
+            # Phase relative to current step start (can be <0 or >sp due to offset).
+            phase = t_eff - step_start_t
+
+            # Clamp snap window to < half-step to avoid pathological snapping.
+            snap = min(float(SNAP_MS) / 1000.0, sp * 0.45)
+
+            # Snap logic (symmetric): near start => previous, near end => next.
+            if phase < snap:
+                return (base_step - 1) % int(grid.steps)
+            if phase > (sp - snap):
+                return (base_step + 1) % int(grid.steps)
+        except Exception:
+            pass
+
+        return base_step
 
         try:
             sp = float(sec_per_step)
@@ -809,7 +865,7 @@ def stepseq_mode(
             _send_note_off(n)
 
     def _tick_playback(now_t: float) -> None:
-        nonlocal play_step, next_step_t, loop_start, loop_end, countin_remaining_steps, countin_step, view_bar, play_bar, queued_view_bar, page
+        nonlocal play_step, next_step_t, loop_start, loop_end, countin_remaining_steps, countin_step, view_bar, play_bar, queued_view_bar, page, rec_state
 
         if (not playing) or (now_t < next_step_t):
             return
@@ -827,8 +883,8 @@ def stepseq_mode(
                 elif beat_len is not None and (countin_step % beat_len) == 0:
                     vel = CLICK_VEL_WEAK
                 if vel is not None:
-                    if _send_note_on(CLICK_NOTE, int(vel)):
-                        _schedule_note_off(CLICK_NOTE, now_t + gate_sec)
+                    if _send_note_on(COUNTIN_NOTE, int(vel)):
+                        _schedule_note_off(COUNTIN_NOTE, now_t + gate_sec)
 
             countin_remaining_steps -= 1
             countin_step += 1
@@ -838,6 +894,8 @@ def stepseq_mode(
             # When count-in finishes, start actual loop at loop_start
             if countin_remaining_steps <= 0:
                 play_step = int(loop_start)
+                if rec_state == RecState.COUNTIN:
+                    rec_state = RecState.RECORDING
 
             # Schedule next tick (drift-safe)
             next_step_t = next_step_t + sec_per_step
@@ -868,8 +926,8 @@ def stepseq_mode(
                 elif beat_len is not None and (play_step % beat_len == 0):
                     vel = CLICK_VEL_WEAK
                 if vel is not None:
-                    if _send_note_on(CLICK_NOTE, int(vel)):
-                        _schedule_note_off(CLICK_NOTE, now_t + gate_sec)
+                    if _send_note_on(METRO_NOTE, int(vel)):
+                        _schedule_note_off(METRO_NOTE, now_t + gate_sec)
 
         # Update play_bar from the *current* playhead step (the one we just fired)
         try:
@@ -1028,7 +1086,12 @@ def stepseq_mode(
             stdscr.border()
         except curses.error:
             pass
-        rec_txt = "REC" if rec_armed else "rec"
+        rec_txt = (
+            "REC" if rec_state == RecState.RECORDING else
+            "CIN" if rec_state == RecState.COUNTIN else
+            "ARM" if rec_state == RecState.READY else
+            "OFF"
+        )
         mod_txt = "*" if modified else " "
 
         # Header line 1: short and stable (no wrapping)
@@ -1366,9 +1429,16 @@ def stepseq_mode(
                         continue
 
                     note = int(getattr(msg, "note", -1))
+                    if rec_state == RecState.OFF:
+                        # v3.0a Phase 3: REC OFF is preview-only (no grid writes).
+                        now_t = time.monotonic()
+                        _monitor_hit(note, vel, now_t)
+                        _set_status(f"PREVIEW NOTE {note}  vel={vel}", duration_sec=0.6)
+                        midi_hit = True
+                        continue
 
-                    if not rec_armed:
-                        # Manual Pad Input Mode MVP-1 (NO timing, NO quantize, NO autoplay):
+                    # REC armed: allow stamping.
+# Manual Pad Input Mode MVP-1 (NO timing, NO quantize, NO autoplay):
                         # - Only when PLAY=OFF, REC=OFF, and not in count-in
                         # - Stamp into current cursor column (cur_step), lane determined by pad note mapping
                         # - Always overwrite (no max-velocity accumulation)
@@ -1447,6 +1517,17 @@ def stepseq_mode(
                         continue
 
                     # REC armed: allow stamping.
+                    # v3.0a Phase 3: only stamp while RECORDING.
+                    if rec_state != RecState.RECORDING:
+                        now_t = time.monotonic()
+                        _monitor_hit(note, vel, now_t)
+                        if rec_state == RecState.COUNTIN:
+                            _set_status("COUNT-IN (no recording)", duration_sec=0.6)
+                        else:
+                            _set_status("ARMED (not recording)", duration_sec=0.6)
+                        midi_hit = True
+                        continue
+
                     # During count-in, do NOT stamp; preview/monitor only.
                     if countin_remaining_steps > 0:
                         now_t = time.monotonic()
@@ -1583,8 +1664,16 @@ def stepseq_mode(
             else:
                 cur_step -= 1
         elif key == ord("r"):
-            # StepSeq live input: toggle REC(arm)
-            rec_armed = not rec_armed
+            # v3.0a Phase 3: toggle record arm (OFF <-> READY).
+            # If pressed during COUNTIN/RECORDING, disarm immediately.
+            if rec_state == RecState.OFF:
+                rec_state = RecState.READY
+                _set_status("REC ARM", duration_sec=0.6)
+            else:
+                rec_state = RecState.OFF
+                countin_remaining_steps = 0
+                countin_step = 0
+                _set_status("REC OFF", duration_sec=0.6)
 
         elif key == ord("["):
             # v3.0a Phase 2: viewBar switching is user-driven; during PLAY it is queued and applied at bar boundary.
@@ -1749,13 +1838,13 @@ def stepseq_mode(
                 _set_status("LOOP FULL", duration_sec=0.7)
 
         elif key == 32:  # Space
-            # MVP-2.6: toggle playback loop (non-blocking), default loop is the *current bar*.
+            # v3.0a: toggle playback loop (non-blocking), default loop is the *current bar*.
             playing = not playing
             if playing:
                 # Auto loop policy:
-                # - Default (REC OFF): FULL loop
-                # - When REC is armed and playback starts: BAR loop (unless user explicitly toggled with 'b')
-                if rec_armed and (not loop_bar_user_override):
+                # - Default: FULL loop
+                # - If REC is armed (READY) when playback starts: BAR loop unless user explicitly toggled with 'b'
+                if (rec_state == RecState.READY) and (not loop_bar_user_override):
                     loop_bar = True
 
                 # Determine loop scope
@@ -1773,10 +1862,18 @@ def stepseq_mode(
 
                 play_step = int(loop_start)
 
-                # 1-bar count-in when REC is armed (click only; stamping disabled during count-in)
-                if rec_armed and COUNTIN_BARS > 0:
-                    countin_remaining_steps = int(spb_local) * int(COUNTIN_BARS)
-                    countin_step = 0
+                # Record state transition on PLAY start
+                # - If REC is armed (READY): run 1-bar count-in then enter RECORDING
+                # - Otherwise: plain PLAY
+                if rec_state == RecState.READY:
+                    if COUNTIN_BARS > 0:
+                        countin_remaining_steps = int(spb_local) * int(COUNTIN_BARS)
+                        countin_step = 0
+                        rec_state = RecState.COUNTIN
+                    else:
+                        countin_remaining_steps = 0
+                        countin_step = 0
+                        rec_state = RecState.RECORDING
                 else:
                     countin_remaining_steps = 0
                     countin_step = 0
@@ -1789,7 +1886,7 @@ def stepseq_mode(
                     else:
                         _set_status("PLAY muted (no MIDI OUT)", duration_sec=1.2)
                 else:
-                    if countin_remaining_steps > 0:
+                    if rec_state == RecState.COUNTIN and countin_remaining_steps > 0:
                         _set_status("PLAY (count-in 1bar)", duration_sec=0.9)
                     else:
                         _set_status("PLAY", duration_sec=0.6)
@@ -1801,8 +1898,15 @@ def stepseq_mode(
                         _send_note_off(n)
                 except Exception:
                     pass
+
                 countin_remaining_steps = 0
                 countin_step = 0
+
+                # Record state transition on STOP:
+                # - If we were recording or counting-in, return to READY (armed) so the user can retry quickly.
+                if rec_state in (RecState.COUNTIN, RecState.RECORDING):
+                    rec_state = RecState.READY
+
                 _set_status("STOP", duration_sec=0.6)
 
             # Drain queued keys (esp. Space)
