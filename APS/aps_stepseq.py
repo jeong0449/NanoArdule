@@ -1399,7 +1399,7 @@ def stepseq_mode(
                     cell = grid.lanes[lane_idx].cells[target_step]
                     _monitor_hit(note, vel, now_t)
                     cell.on = True
-                    cell.vel = max(int(getattr(cell, "vel", 0) or 0), int(vel))
+                    cell.vel = int(vel)
                     modified = True
                     midi_hit = True
                     # Manual/REC MIDI hits do not auto-advance cursor (explicit key only)
