@@ -588,6 +588,77 @@ def stepseq_mode(
         )
 
     baseline_sig = _grid_signature(grid)
+    # ------------------------------------------------------------
+    # v3.0a: One-step UNDO (Ctrl+Z / Backspace / Delete)
+    # - Snapshot scope: current bar(page) only.
+    # - Used for destructive ops (F7/F8/F9), Enter, and bar copy.
+    # ------------------------------------------------------------
+    undo_valid = False
+    undo_page = 0
+    undo_st = 0
+    undo_ed = 0
+    undo_cells = None  # List[List[Tuple[bool,int]]]
+    undo_desc = ""
+
+    def _push_undo_snapshot(desc: str = ""):
+        nonlocal undo_valid, undo_page, undo_st, undo_ed, undo_cells, undo_desc
+        # v3.0a: single-level UNDO captures the *whole pattern* (all steps),
+        # so it works consistently for BAR/PATTERN loop scopes and F-key deletes.
+        try:
+            st, ed = 0, int(grid.steps)
+        except Exception:
+            st, ed = 0, 0
+
+        snap = []
+        for ln in grid.lanes:
+            row = []
+            for s in range(st, ed):
+                c = ln.cells[s]
+                row.append((bool(getattr(c, "on", False)), int(getattr(c, "vel", 0) or 0)))
+            snap.append(row)
+
+        undo_valid = True
+        undo_page = int(page)
+        undo_st = int(st)
+        undo_ed = int(ed)
+        undo_cells = snap
+        undo_desc = str(desc or "")
+
+    def _apply_undo_snapshot() -> bool:
+        nonlocal undo_valid, undo_page, undo_st, undo_ed, undo_cells, undo_desc, modified, cur_step, page
+        if (not undo_valid) or (undo_cells is None):
+            _set_status("UNDO: nothing", duration_sec=0.8)
+            return False
+
+        try:
+            st = int(undo_st)
+            ed = int(undo_ed)
+        except Exception:
+            st, ed = 0, int(grid.steps)
+
+        for li, ln in enumerate(grid.lanes):
+            if li >= len(undo_cells):
+                break
+            row = undo_cells[li]
+            for off, s in enumerate(range(st, ed)):
+                if off >= len(row):
+                    break
+                onv, velv = row[off]
+                ln.cells[s].on = bool(onv)
+                ln.cells[s].vel = int(velv)
+
+        page = int(undo_page)
+        try:
+            cur_step = max(st, min(cur_step, ed - 1))
+        except Exception:
+            cur_step = st
+
+        undo_valid = False
+        undo_cells = None
+        _set_status("UNDO" + (": " + undo_desc if undo_desc else ""), duration_sec=0.8)
+        modified = True
+        return True
+
 
     # --- MVP-2: metronome + non-blocking playback loop ---
     metro_on = False
@@ -616,7 +687,7 @@ def stepseq_mode(
     COUNTIN_BARS = 1  # fixed 1-bar count-in for MVP
 
     loop_bar = LOOP_BAR_DEFAULT
-    loop_bar_user_override = False  # becomes True after user presses 'b'
+    loop_bar_user_override = False  # becomes True after user presses 'o'
     loop_start = 0
     loop_end = int(grid.steps)
 
@@ -1038,7 +1109,7 @@ def stepseq_mode(
         pad_txt   = "PAD:Y"    if pad_present else "PAD:N"
         play_txt  = "PLAY:Y"   if playing     else "PLAY:N"
         metro_txt = "MET:Y"    if metro_on    else "MET:N"
-        loop_txt  = "LOOP:BAR" if loop_bar    else "LOOP:FULL"
+        loop_txt  = "LOOP:BAR" if loop_bar    else "LOOP:PATTERN"
         cin_txt   = "CIN" if (countin_remaining_steps > 0) else ""
         kgrid_txt  = "KGRID:ON LOCK16" if kbd_pad_mode else "KGRID:OFF"
 
@@ -1134,7 +1205,7 @@ def stepseq_mode(
             col += 3
             local_idx += 1
 
-        footer_full = "Move: arrows/h/j/k/l  Home:bar start  Enter:write accent / toggle off  A:accent  J;/K':vel  r:REC(arm)  [ ]:bar  c:copy bar1->bar2  Shift+B:clr bar  Shift+R:clr row  Shift+C:clr col  Space:play/stop  b:loop  m:metro  w:save  Backspace/Delete:clear last hit-group  q/Esc:exit"
+        footer_full = "Move: arrows/h/j/k/l  Home:bar start  Enter:write/toggle  A:accent  PgUp/PgDn:vel  r:REC(arm)  [ ]:bar  Space:play/stop  O:loop scope(BAR↔PATTERN)  m:metro  w:save  Ctrl+Z/Backspace/Delete:Undo  F7:del row  F8:del col  F9:del bar  q/Esc:exit"
         footer_w = max(1, max_x - 4)
         footer_lines = textwrap.wrap(footer_full, width=footer_w, break_long_words=False, break_on_hyphens=False) or [""]
 
@@ -1375,6 +1446,18 @@ def stepseq_mode(
             continue
 
 
+        # ------------------------------------------------------------
+        # v3.0a UNDO keys
+        # - Ctrl+Z (26)
+        # - Backspace / Delete
+        # ------------------------------------------------------------
+        if key in (26, curses.KEY_BACKSPACE, 127, 8, curses.KEY_DC):
+            _apply_undo_snapshot()
+            clamp_cursor()
+            modified = (_grid_signature(grid) != baseline_sig)
+            draw()
+            continue
+
         now_t = time.monotonic()
         _process_pending_note_off(now_t)
         _tick_playback(now_t)
@@ -1530,7 +1613,7 @@ def stepseq_mode(
             draw()
             continue
 
-        elif (key == ord('r') and (not kbd_pad_mode)) or (key == ord('R')):
+        elif (key == ord('r') and (not kbd_pad_mode)):
             # StepSeq live input: toggle REC(arm)
             rec_armed = not rec_armed
 
@@ -1562,6 +1645,7 @@ def stepseq_mode(
                 cur_step = end
 
         elif key == ord("\n"):  # Enter
+            _push_undo_snapshot("enter")
             lane = grid.lanes[cur_lane]
             cell = lane.cells[cur_step]
             if cell.on:
@@ -1574,6 +1658,44 @@ def stepseq_mode(
                 cell.vel = level_to_vel(enter_accent_level)
                 # Friendly audition on creation
                 _preview_note(lane.note, cell.vel)
+            modified = True
+
+        # ------------------------------------------------------------
+        # v3.0a: Destructive deletes (official) - F7/F8/F9
+        # - F7: clear current ROW (lane) within current bar(page)
+        # - F8: clear current COLUMN (step) within current bar(page)
+        # - F9: clear current BAR (page)
+        # ------------------------------------------------------------
+        elif key == curses.KEY_F7:
+            _push_undo_snapshot("del row")
+            st = page * page_size
+            ed = min(st + page_size, grid.steps)
+            lane = grid.lanes[cur_lane]
+            for s in range(st, ed):
+                lane.cells[s].on = False
+                lane.cells[s].vel = 0
+            modified = True
+
+        elif key == curses.KEY_F8:
+            st = page * page_size
+            ed = min(st + page_size, grid.steps)
+            if st <= cur_step < ed:
+                _push_undo_snapshot("del col")
+                for lane in grid.lanes:
+                    lane.cells[cur_step].on = False
+                    lane.cells[cur_step].vel = 0
+                modified = True
+            else:
+                _set_status("DEL COL: move cursor into this bar", duration_sec=1.0)
+
+        elif key == curses.KEY_F9:
+            _push_undo_snapshot("del bar")
+            st = page * page_size
+            ed = min(st + page_size, grid.steps)
+            for lane in grid.lanes:
+                for s in range(st, ed):
+                    lane.cells[s].on = False
+                    lane.cells[s].vel = 0
             modified = True
 
         elif (key == ord('a') and (not kbd_pad_mode)) or (key == ord('A')):  # A: cycle Enter input accent
@@ -1626,41 +1748,9 @@ def stepseq_mode(
                 modified = True
 
         # ------------------------------------------------------------
-        # StepSeq matrix edit (Shift+B/R/C)
-        # - Shift+B: clear current bar (page)
-        # - Shift+R: clear current row (instrument lane) within current bar
-        # - Shift+C: clear current column (step) within current bar
-        # NOTE: These are StepSeq-local keys.
-        # ------------------------------------------------------------
-        elif key == ord('B'):  # Shift+B: clear current bar
-            start = page * page_size
-            end = min(start + page_size, grid.steps)
-            for lane in grid.lanes:
-                for s in range(start, end):
-                    lane.cells[s].on = False
-                    lane.cells[s].vel = 0
-            modified = True
-
-        elif key == ord('R'):  # Shift+R: clear current row (lane) in current bar
-            start = page * page_size
-            end = min(start + page_size, grid.steps)
-            lane = grid.lanes[cur_lane]
-            for s in range(start, end):
-                lane.cells[s].on = False
-                lane.cells[s].vel = 0
-            modified = True
-
-        elif key == ord('C'):  # Shift+C: clear current column (step) in current bar
-            # Guard: only apply when cursor step is inside current bar page
-            start = page * page_size
-            end = min(start + page_size, grid.steps)
-            if start <= cur_step < end:
-                for lane in grid.lanes:
-                    lane.cells[cur_step].on = False
-                    lane.cells[cur_step].vel = 0
-                modified = True
-
+        # (v3.0a) Destructive clears moved to F7/F8/F9. Shift+B/R/C deprecated.
         elif (key == ord('c') and (not kbd_pad_mode)) or (key == ord('C')):
+            _push_undo_snapshot("copy bar")
             # Copy bar1 -> bar2 (page_size steps) when bar2 exists
             if grid.steps >= 2 * page_size:
                 for lane in grid.lanes:
@@ -1682,21 +1772,24 @@ def stepseq_mode(
             else:
                 _set_status("METRO OFF", duration_sec=0.6)
 
-        elif key in (ord("b"), ord("B")):
+        elif key in (ord("o"), ord("O")):
             loop_bar_user_override = True
             loop_bar = not loop_bar
             if loop_bar:
                 _set_status("LOOP BAR", duration_sec=0.7)
             else:
-                _set_status("LOOP FULL", duration_sec=0.7)
+                _set_status("LOOP PATTERN", duration_sec=0.7)
 
         elif key == 32:  # Space
             # MVP-2.6: toggle playback loop (non-blocking), default loop is the *current bar*.
             playing = not playing
             if playing:
+                if rec_armed:
+                    # Start of a REC take: make UNDO revert just this take (not older destructive ops).
+                    _push_undo_snapshot("rec take")
                 # Auto loop policy:
                 # - Default (REC OFF): FULL loop
-                # - When REC is armed and playback starts: BAR loop (unless user explicitly toggled with 'b')
+                # - When REC is armed and playback starts: BAR loop (unless user explicitly toggled with 'o')
                 if rec_armed and (not loop_bar_user_override):
                     loop_bar = True
 
