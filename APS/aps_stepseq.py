@@ -724,6 +724,18 @@ def stepseq_mode(
     pending_note_off = []
 
 
+
+    # ------------------------------------------------------------
+    # v3.0a UI follow-playhead (minimal)
+    # - During PLAY (especially LOOP:PATTERN), advance cursor/page with playhead and
+    #   refresh the screen periodically so the currently playing bar is visible.
+    # - Rate-limited to avoid harming realtime input responsiveness.
+    # ------------------------------------------------------------
+    ui_dirty = False
+    ui_last_draw_t = 0.0
+    UI_MAX_FPS = 30.0
+    UI_MIN_DT = 1.0 / UI_MAX_FPS
+
     # ------------------------------------------------------------------
     # StepSeq UI helpers (status + audition) and slot/empty-lane policy
     # ------------------------------------------------------------------
@@ -928,7 +940,7 @@ def stepseq_mode(
             _send_note_off(n)
 
     def _tick_playback(now_t: float) -> None:
-        nonlocal play_step, next_step_t, cur_step, page, loop_start, loop_end, countin_remaining_steps, countin_step
+        nonlocal play_step, next_step_t, cur_step, page, loop_start, loop_end, countin_remaining_steps, countin_step, ui_dirty
 
         if (not playing) or (now_t < next_step_t):
             return
@@ -966,6 +978,7 @@ def stepseq_mode(
             next_step_t = next_step_t + sec_per_step
             if next_step_t < now_t - sec_per_step:
                 next_step_t = now_t + sec_per_step
+            ui_dirty = True  # playhead/cursor updated during count-in
             return
 
         # -----------------------------
@@ -997,6 +1010,7 @@ def stepseq_mode(
         # Keep cursor synced to the *current* playhead step (the one we just fired)
         cur_step = int(play_step)
         page = cur_step // page_size
+        ui_dirty = True  # playhead advanced; request UI refresh
 
         # Advance playhead for the next tick (loop current bar by default)
         play_step = int(play_step) + 1
@@ -1462,6 +1476,18 @@ def stepseq_mode(
         _process_pending_note_off(now_t)
         _tick_playback(now_t)
 
+        # v3.0a UI follow-playhead: redraw periodically while playing (rate-limited)
+        if playing and ui_dirty:
+            try:
+                if (now_t - ui_last_draw_t) >= UI_MIN_DT:
+                    draw()
+                    ui_last_draw_t = now_t
+                    ui_dirty = False
+            except Exception:
+                # Keep StepSeq running even if redraw fails
+                ui_dirty = False
+
+
         # Poll MIDI (non-blocking). When REC armed, NoteOn stamps into current cursor step.
         # Poll MIDI (non-blocking).
         # - REC=OFF: preview-only (sound only if MIDI OUT is available), no grid changes.
@@ -1520,7 +1546,7 @@ def stepseq_mode(
                     cell = grid.lanes[lane_idx].cells[target_step]
                     _monitor_hit(note, vel, now_t)
                     cell.on = True
-                    cell.vel = max(int(getattr(cell, "vel", 0) or 0), int(vel))
+                    cell.vel = int(vel)
                     modified = True
                     midi_hit = True
                     # Manual/REC MIDI hits do not auto-advance cursor (explicit key only)
