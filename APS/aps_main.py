@@ -2401,19 +2401,35 @@ bpm=bpm,
                 countin_idx = new_idx  # -1 = None, 0..N-1 = preset
             continue
 
-        # F9: change BPM
+# F9: change BPM
         if ch == curses.KEY_F9:
-            s = dialog_input(stdscr, f"BPM (current {bpm}):", default_text=str(bpm), maxlen=6)
+            BPM_MIN = 30
+            BPM_MAX = 240
+
+            s = dialog_input(
+                stdscr,
+                f"BPM ({BPM_MIN}-{BPM_MAX}) current {bpm}:",
+                default_text=str(bpm),
+                maxlen=6
+            )
+
             if s is None:
-                # canceled
                 continue
+
             try:
                 v = int(s)
-                if v > 0:
-                    push_undo()
-                    bpm = v
+
+                # 범위 벗어나면 거부
+                if not (BPM_MIN <= v <= BPM_MAX):
+                    msg = f"BPM must be {BPM_MIN}-{BPM_MAX}"
+                    continue
+
+                push_undo()
+                bpm = v
+
             except Exception:
-                pass
+                msg = "Invalid BPM"
+
             continue
 
         # Toggle focus (Tab)
