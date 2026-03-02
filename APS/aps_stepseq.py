@@ -419,7 +419,14 @@ def _open_stepseq_midi_output(pad_present: bool = False):
             return None
 
     try:
-        return mido.open_output(pick)
+        port = mido.open_output(pick)
+        # --- Tag GS wavetable output for REC policy checks ---
+        try:
+            setattr(port, "_aps_is_gs_wavetable", bool(_is_gs_wavetable(pick)))
+            setattr(port, "_aps_out_port_name", str(pick or ""))
+        except Exception:
+            pass
+        return port
     except Exception:
         # Some backends print noisy WinMM errors even if we catch exceptions.
         # Treat as "no output" and keep StepSeq running.
@@ -499,6 +506,10 @@ def stepseq_mode(
 
     midi_out = _open_stepseq_midi_output(pad_present=pad_present)
     midi_out_ok = bool(midi_out)
+
+    # --- Determine whether realtime REC is allowed ---
+    gs_out = bool(getattr(midi_out, "_aps_is_gs_wavetable", False))
+    rec_allowed = (midi_out_ok and (not gs_out))
 
     status_msg = ""
     status_msg_until = 0.0
@@ -1640,7 +1651,17 @@ def stepseq_mode(
             continue
 
         elif (key == ord('r') and (not kbd_pad_mode)):
-            # StepSeq live input: toggle REC(arm)
+            # --- Block REC when no external MIDI OUT or GS Wavetable ---
+            if not rec_allowed:
+                rec_armed = False
+                if not midi_out_ok:
+                    _set_status("REC disabled: no MIDI OUT (set APS_STEPSEQ_MIDI_OUT)", duration_sec=1.6)
+                else:
+                    _set_status("REC disabled: Microsoft GS Wavetable is high-latency", duration_sec=1.6)
+                draw()
+                continue
+
+            # OK: allow toggle
             rec_armed = not rec_armed
 
         elif key == ord("["):
