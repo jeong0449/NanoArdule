@@ -94,6 +94,11 @@ The **MPK MINI Pad 16 Set** defines a reference physical mapping for 4×4 pad co
 |                    | SP (55) SPLASH |               |                | O               | Upper_3D     |
 | Legacy / Optional  | PH (44) HH_PED | O             |                |                 | —            |
 
+### APS StepSeq - 4x4 Keyboard Grid Layout
+<p align="center">
+  <img src="../images/APS_StepSeq_4x4_Keyboard_Grid_Layout.png" width="480">
+</p>
+
 ---
 
 ## 6. Design Rationale (Informative)
