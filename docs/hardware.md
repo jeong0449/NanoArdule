@@ -71,3 +71,34 @@ Because A6 does not support the internal pull-up resistor, an **external pull-up
 ## Nano Ardule Hardware Prototype
 
 <img src="../images/Nano_Ardule.png"  width="600" alt="Nano Ardule prototype enclosed in a plastic case">
+
+---
+
+## Post-PC900 MIDI IN (6N138 Replacement Circuit)
+
+The original design used the **Sharp PC900 opto-isolator**, which was commonly found in early MIDI interfaces.  
+Unfortunately the PC900 has become increasingly difficult to source. For new builds we recommend using the widely available **6N138 optocoupler** instead.
+
+However, the 6N138 **is not a drop-in replacement** for the PC900.
+
+Unlike the PC900, the 6N138 uses a **photodarlington output stage** which produces slower signal edges.  
+To ensure reliable UART reception at the MIDI baud rate (31,250 bps), an additional **Schmitt trigger buffer** should be used.
+
+In this design the spare gates of a **74HC14** are used to clean up the signal.
+
+### Recommended signal chain
+
+````
+MIDI IN → 6N138 → pull-up resistor → 74HC14 → 74HC14 → MCU RX
+````
+
+Using **two cascaded Schmitt trigger gates** is recommended:
+
+* First gate sharpens the slow edge from the optocoupler
+* Second gate restores polarity and further cleans the signal
+
+This produces a very stable logic-level waveform for the microcontroller UART.
+
+
+
+
