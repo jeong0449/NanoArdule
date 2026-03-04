@@ -78,6 +78,9 @@ Because A6 does not support the internal pull-up resistor, an **external pull-up
 
 The original design used the **Sharp PC900 opto-isolator**, which was commonly found in early MIDI interfaces.  
 Unfortunately the PC900 has become increasingly difficult to source. For new builds we recommend using the widely available **6N138 optocoupler** instead.
+For reference, see the SparkFun MIDI Shield schematic using the 6N138 optocoupler:
+
+https://cdn.sparkfun.com/datasheets/Dev/Arduino/Shields/Midi_Shieldv15.pdf
 
 However, the 6N138 **is not a drop-in replacement** for the PC900.
 
