@@ -134,5 +134,37 @@ Compared with a direct optocoupler output, this circuit provides:
 
 Using the **6N138 + 74HC14 combination** has become a widely adopted solution for modern MIDI hardware designs where the original PC900 is no longer available.
 
+### Why not use the 6N137?
 
+Another optocoupler frequently mentioned in MIDI designs is the **6N137**.  
+At first glance it may seem like a better choice because it is a **much faster device** than the 6N138.
+
+However, the 6N137 is **not always the most suitable optocoupler for MIDI input circuits**.
+
+The reason is related to the way MIDI signals are transmitted.
+
+MIDI uses a **5 mA current loop** through the LED of the optocoupler.  
+The 6N137 requires a relatively **higher LED drive current** to switch reliably compared with the 6N138.
+
+Because of this, some MIDI devices may not provide enough current to reliably drive a 6N137, especially when:
+
+- the transmitter uses conservative resistor values  
+- cable lengths are long  
+- the transmitter current is slightly below the nominal 5 mA  
+
+The **6N138**, on the other hand, has a **much higher current transfer ratio (CTR)** due to its photodarlington output stage.  
+This allows it to operate reliably even with lower LED current.
+
+For this reason the **6N138 became the most commonly used optocoupler in many MIDI interface designs**, despite being slower.
+
+The slower switching speed can easily be compensated for by adding a **Schmitt trigger buffer**, such as the **74HC14**, which produces clean digital edges for the microcontroller UART.
+
+In summary:
+
+| Device | Advantages | Disadvantages |
+|------|------|------|
+| **6N138** | High CTR, works reliably with low LED current | Slower edges (needs Schmitt trigger cleanup) |
+| **6N137** | Very fast logic output | Requires higher LED current |
+
+For robust MIDI hardware designs, the **6N138 + Schmitt trigger buffer** remains a very reliable solution.
 
