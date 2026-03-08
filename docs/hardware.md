@@ -89,11 +89,32 @@ To ensure reliable UART reception at the MIDI baud rate (31,250 bps), an additio
 
 In this design the spare gates of a **74HC14** are used to clean up the signal.
 
+### Base resistor on pin 7
+
+When using the **6N138**, it is strongly recommended to connect **pin 7 (base of the output transistor)** to **GND through a resistor**, typically around **10 kΩ**.
+
+This resistor significantly improves switching performance.
+
+Because the 6N138 uses a **photodarlington transistor**, charge tends to accumulate in the base region while the device is conducting.  
+Without a discharge path, this stored charge causes the transistor to turn off slowly, resulting in **long fall times and distorted signal edges**.
+
+The resistor on pin 7 provides a **discharge path for the base**, allowing the transistor to turn off more quickly.  
+This reduces storage time and produces much cleaner digital transitions.
+
+In short, the resistor:
+
+- prevents charge storage in the photodarlington base  
+- improves turn-off speed  
+- produces sharper signal edges  
+- improves reliability of MIDI UART reception  
+
 ### Recommended signal chain
 
 ````
-MIDI IN → 6N138 → pull-up resistor → 74HC14 → 74HC14 → MCU RX
+MIDI IN → 6N138 → pull-up resistor (4.7 kΩ – 10 kΩ) → 74HC14 → 74HC14 → MCU RX
 ````
+A value around **4.7 kΩ** is commonly recommended because it produces faster rising edges.
+
 
 Using **two cascaded Schmitt trigger gates** is recommended:
 
@@ -102,6 +123,16 @@ Using **two cascaded Schmitt trigger gates** is recommended:
 
 This produces a very stable logic-level waveform for the microcontroller UART.
 
+### Practical advantages of this design
+
+Compared with a direct optocoupler output, this circuit provides:
+
+- reliable operation at **31,250 bps MIDI speed**
+- excellent noise immunity
+- compatibility with **modern microcontrollers**
+- improved timing stability
+
+Using the **6N138 + 74HC14 combination** has become a widely adopted solution for modern MIDI hardware designs where the original PC900 is no longer available.
 
 
 
