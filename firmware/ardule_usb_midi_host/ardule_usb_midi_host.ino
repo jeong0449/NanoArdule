@@ -43,6 +43,46 @@
 
 LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 
+
+// ===================== Activity LED =====================
+#define ACT_LED_PIN              A0
+#define ACT_LED_ACTIVE_HIGH      1
+#define ACT_LED_PULSE_MS         25   // brief visible blink
+#define ACT_LED_MIN_INTERVAL_MS  60   // throttle when MIDI is dense
+
+static uint32_t actLedOffAt = 0;
+static uint32_t actLedLastPulseAt = 0;
+
+static inline void actLedSet(bool on) {
+#if ACT_LED_ACTIVE_HIGH
+  digitalWrite(ACT_LED_PIN, on ? HIGH : LOW);
+#else
+  digitalWrite(ACT_LED_PIN, on ? LOW : HIGH);
+#endif
+}
+
+static inline void actLedBegin() {
+  pinMode(ACT_LED_PIN, OUTPUT);
+  actLedSet(true);   // power present -> always on
+}
+
+static inline void actLedTrigger() {
+  uint32_t now = millis();
+  if ((now - actLedLastPulseAt) < ACT_LED_MIN_INTERVAL_MS) return;
+  actLedLastPulseAt = now;
+  actLedOffAt = now + ACT_LED_PULSE_MS;
+  actLedSet(false);  // blink by briefly turning off from steady-on state
+}
+
+static inline void actLedService() {
+  if (actLedOffAt == 0) return;
+  uint32_t now = millis();
+  if ((int32_t)(now - actLedOffAt) >= 0) {
+    actLedOffAt = 0;
+    actLedSet(true);
+  }
+}
+
 // ===================== USB Host =====================
 USB Usb;
 USBH_MIDI Midi(&Usb);
@@ -279,6 +319,7 @@ static void lcdRefreshIfDue() {
 void setup() {
   pinMode(10, OUTPUT);
   digitalWrite(10, HIGH);
+  actLedBegin();
 
 #if DEBUG
   DBG.begin(115200);
@@ -325,6 +366,7 @@ void setup() {
 }
 
 void loop() {
+  actLedService();
   Usb.Task();
 
   // Update USB state (value only)
@@ -340,6 +382,7 @@ void loop() {
   uint8_t p[4] = {0,0,0,0};
   int r = Midi.RecvData(p);
   if (r > 0) {
+    actLedTrigger();
     // ★ While playing: trigger LCD freeze
     lastMidiMs = millis();
 
