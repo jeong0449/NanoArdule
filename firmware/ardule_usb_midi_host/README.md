@@ -1,84 +1,149 @@
 # Ardule USB MIDI Host
 
-Date: 2026-01-26
+**First Created:** 2026-01-26  
+**Last Updated:** 2026-04-17  
 
 ---
 
-## 1. Overview (What this is)
+## 1. Overview
 
-**Ardule USB MIDI Host** is a **companion side project** within the Nano Ardule ecosystem.
+**Ardule USB MIDI Host** is a dedicated **USB + DIN MIDI bridge firmware** built on Arduino UNO with a USB Host Shield.
 
-Its purpose is to receive **USB MIDI devices** (such as USB MIDI keyboards) using an Arduino UNO with a USB Host Shield (MAX3421E), and to convert them into a **standard DIN 5-pin MIDI output (31,250 bps)** in a reliable and latency-safe manner.
+It now functions as a **unified MIDI ingress device**, capable of receiving:
 
-This firmware is **not** a Nano Ardule Controller or Player by itself. Instead, it serves as a dedicated **USB MIDI ingress**, allowing Nano Ardule systems to interact with the USB MIDI world.
+- USB MIDI devices (via USB Host Shield)
+- DIN MIDI devices (via UART RX)
 
----
+and forwarding them to:
 
-## 2. Why this exists
-
-* Arduino Nano–class boards cannot act as USB hosts.
-* Nano Ardule MIDI Controllers are designed around DIN MIDI input.
-* To use modern USB MIDI keyboards with Nano Ardule, a stable USB-to-DIN MIDI front-end is required.
-
-This project was created to fill that role cleanly, without overloading the Nano Ardule Controller with USB host responsibilities.
+- DIN MIDI OUT (hardware TX)
+- USB-serial interface (to host systems like Raspberry Pi)
 
 ---
 
-## 3. Hardware configuration
+## 2. System Concept
 
-* Arduino UNO
-* USB Host Shield (MAX3421E based)
-* USB MIDI keyboard
-* DIN 5-pin MIDI OUT
+![MIDI Router](../images/MIDI_router_20260416.png)
+
+The firmware has evolved beyond a simple USB-to-DIN converter and now operates effectively as a:
+
+> **MIDI Router / MIDI Bridge**
+
+---
+
+## 3. Relationship to Fluid Ardule
+
+Within the separate project **Fluid Ardule**, this device is commonly referred to as:
+
+> **UNO-2**
+
+Fluid Ardule is a modular DIY sound module system built around:
+
+- Raspberry Pi (synthesis engine, e.g., FluidSynth)
+- Arduino-based controllers and MIDI engines
+
+In this architecture:
+
+- **UNO-1** → UI controller  
+- **UNO-2 (this firmware)** → MIDI input / routing engine  
+
+UNO-2 is responsible for:
+
+- Receiving MIDI from multiple sources (USB / DIN)
+- Forwarding clean MIDI streams to the synthesis engine
+- Acting as a reliable bridge between hardware MIDI and software synthesis
+
+---
+
+## 4. Hardware configuration
+
+- Arduino UNO
+- USB Host Shield (MAX3421E)
+- USB MIDI keyboard
+- DIN MIDI IN (optional)
+- DIN MIDI OUT
 
 Key points:
 
-* DIN MIDI OUT uses **hardware serial TX (D1) at 31,250 bps**
-* Downstream devices (including Nano Ardule) are assumed to use **opto-isolated MIDI IN**
+- DIN OUT uses hardware serial TX (D1) at 31250 bps
+- DIN IN uses UART RX (D0)
+- USB-serial shares the same hardware UART
 
 ---
 
-## 4. Key technical points
+## 5. Key architectural change (v0.5)
 
-* `USBH_MIDI::RecvData()` returns a **USB-MIDI Event Packet (4 bytes)**
-* `msg[0]` is a **USB-MIDI header (including CIN)**, not a MIDI status byte
-* MIDI message length must be determined using the **CIN / status combination**
-* SysEx messages (CIN 0x4 / 0x6 / 0x7) are currently ignored
-* DIN MIDI data is forwarded directly, without generating running status
+### Previous behavior (v0.4)
+- USB MIDI → DIN OUT
 
----
+### Current behavior (v0.5)
+- USB MIDI → Serial
+- DIN MIDI IN → Serial
 
-## 5. LCD and latency problem (important)
+👉 Both inputs are merged and forwarded to:
+- DIN OUT
+- USB-serial
 
-When a 20×4 I2C LCD was added, **noticeable performance degradation** during live playing was observed.
+This transforms UNO-2 into a:
 
-Summary:
-
-* USB Host Shields rely heavily on frequent polling via `Usb.Task()`
-* I2C LCD updates consume CPU time and block USB polling
-* Throttling LCD updates alone was insufficient to eliminate latency
-
-Final solution:
-
-> **Completely disable LCD updates while MIDI events are active,
-> and resume LCD updates only after a defined idle period.**
-
-This approach reduces I2C traffic to zero during performance and restores responsiveness comparable to running without an LCD.
+> **Unified USB + DIN MIDI router/bridge**
 
 ---
 
-## 6. Relationship to Nano Ardule
+## 6. MIDI handling notes
 
-* This firmware is not part of the Nano Ardule core
-* It acts as a **USB MIDI ingress module** placed in front of the Nano Ardule MIDI Controller
-* Its role is to deliver clean, timing-safe MIDI data so that Nano Ardule can focus on processing (layering, remapping, filtering)
+- USB MIDI packets are parsed using CIN/status logic
+- Running status is not generated
+- **SysEx messages are NOT supported (ignored)**
+  - (CIN 0x4 / 0x6 / 0x7 not processed)
 
 ---
 
-## 7. Current status
+## 7. Limitations
 
-* Single USB MIDI device supported
-* Stable enough for live performance
-* Designed specifically as a companion to Nano Ardule
+- USB and DIN inputs are merged (no source distinction)
+- DIN IN is echoed to DIN OUT (possible loop depending on setup)
+- SysEx messages are not handled
+- Only single USB MIDI device supported
 
-Future separation into a standalone project remains possible, but the current intent is to keep it as a side branch of the Nano Ardule ecosystem.
+---
+
+## 8. USB-Serial MIDI usage (Important)
+
+All MIDI data is also output via the UNO's USB-serial interface.
+
+This allows external systems (e.g., Raspberry Pi) to use the stream by:
+
+1. Reading raw MIDI bytes from `/dev/serial/by-id/...`
+2. Converting them to ALSA MIDI using a bridge program
+
+Example workflow:
+
+```
+UNO-2 → USB-serial → C bridge → ALSA sequencer → FluidSynth
+```
+
+---
+
+## 9. LCD and latency considerations
+
+- USB polling must remain responsive
+- LCD updates are disabled during MIDI activity
+- Restored after idle period
+
+---
+
+## 10. Version note
+
+v0.5 represents a major evolution:
+
+> From: USB MIDI converter  
+> To:   MIDI router / MIDI bridge (USB + DIN unified)
+
+---
+
+## 11. Future work
+
+- Source separation (USB vs DIN)
+- SysEx support
+- Multiple device handling
