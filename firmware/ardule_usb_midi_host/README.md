@@ -1,7 +1,7 @@
 # Ardule USB MIDI Host
 
 **First Created:** 2026-01-26  
-**Last Updated:** 2026-04-17  
+**Last Updated:** 2026-04-17 (v0.5) 
 
 ---
 
