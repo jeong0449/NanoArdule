@@ -23,8 +23,8 @@ and forwarding them to:
 
 ## 2. System Concept
 
-<p align="center">
-  <img src="../../images/MIDI_router_20260416.png" width="480">
+<p>
+  <img src="../../images/MIDI_router_20260416.png" width="800" alignment="left">
 </p>
 
 The firmware has evolved beyond a simple USB-to-DIN converter and now operates effectively as a:
