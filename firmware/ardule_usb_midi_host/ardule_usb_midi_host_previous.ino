@@ -31,7 +31,7 @@
 
 // ===================== Identity =====================
 #define FW_NAME   "Ardule USB->DIN"
-#define FW_VER    "v0.5 USB+DIN->SER"
+#define FW_VER    "v0.4 freezeLCD"
 
 // ===================== LCD =====================
 #define LCD_ADDR  0x27          // common: 0x27 or 0x3F
@@ -368,23 +368,6 @@ void setup() {
 void loop() {
   actLedService();
   Usb.Task();
-
-  // DIN MIDI IN (UART RX=D0) -> Serial TX=D1
-  // This also appears on the UNO USB-serial interface.
-  // We intentionally do not distinguish sources here.
-  bool dinActivity = false;
-  for (uint8_t n = 0; n < 16 && MIDI_SERIAL.available() > 0; n++) {
-    uint8_t b = MIDI_SERIAL.read();
-    MIDI_SERIAL.write(b);
-    dinActivity = true;
-  }
-  if (dinActivity) {
-    actLedTrigger();
-    lastMidiMs = millis();
-#if DEBUG
-    DPRINTLN(F("[DIN->SER]"));
-#endif
-  }
 
   // Update USB state (value only)
   uint8_t s = Usb.getUsbTaskState();
