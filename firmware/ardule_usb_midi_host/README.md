@@ -35,7 +35,7 @@ The firmware has evolved beyond a simple USB-to-DIN converter and now operates e
 
 ## 3. Relationship to Fluid Ardule
 
-Within the separate project **Fluid Ardule**, this device is commonly referred to as:
+Within the separate project [**Fluid Ardule**](https://github.com/jeong0449/FluidArdule), this device is commonly referred to as:
 
 > **UNO-2**
 
