@@ -117,7 +117,7 @@ All MIDI data is also output via the UNO's USB-serial interface.
 This allows external systems (e.g., Raspberry Pi) to use the stream by:
 
 1. Reading raw MIDI bytes from `/dev/serial/by-id/...`
-2. Converting them to ALSA MIDI using a bridge program
+2. Converting them to ALSA MIDI using a bridge program, [`uno-midi-bridge`](https://github.com/jeong0449/uno-midi-bridge)
 
 Example workflow:
 
