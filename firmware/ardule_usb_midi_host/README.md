@@ -7,7 +7,7 @@
 
 ## 1. Overview
 
-**Ardule USB MIDI Host** is a dedicated **USB + DIN MIDI router/bridge firmware** built on Arduino UNO with a USB Host Shield (`UNO-2`).
+**Ardule USB MIDI Router** (formerly Ardule USB MIDI host) is a dedicated **USB + DIN MIDI router/bridge firmware** built on Arduino UNO with a USB Host Shield (`UNO-2`).
 
 It now functions as a **unified MIDI ingput device**, capable of receiving:
 
