@@ -1,15 +1,15 @@
-# Ardule USB MIDI Host
+# Ardule USB MIDI Router (UNO-2 Firmware)
 
 **First Created:** 2026-01-26  
-**Last Updated:** 2026-04-17 (v0.5) 
+**Last Updated:** 2026-04-23 (v0.6) 
 
 ---
 
 ## 1. Overview
 
-**Ardule USB MIDI Host** is a dedicated **USB + DIN MIDI bridge firmware** built on Arduino UNO with a USB Host Shield.
+**Ardule USB MIDI Host** is a dedicated **USB + DIN MIDI router/bridge firmware** built on Arduino UNO with a USB Host Shield (`UNO-2`).
 
-It now functions as a **unified MIDI ingress device**, capable of receiving:
+It now functions as a **unified MIDI ingput device**, capable of receiving:
 
 - USB MIDI devices (via USB Host Shield)
 - DIN MIDI devices (via UART RX)
@@ -30,6 +30,23 @@ and forwarding them to:
 The firmware has evolved beyond a simple USB-to-DIN converter and now operates effectively as a:
 
 > **MIDI Router / MIDI Bridge**
+
+---
+### Terminology (Important)
+
+To avoid confusion, the following terms are used consistently:
+
+- **UNO-2 (hardware)**  
+  The physical Arduino UNO-based device with USB Host Shield and DIN MIDI interfaces.
+
+- **UNO-2 firmware (this project)**  
+  The embedded software running on the Arduino, responsible for handling MIDI input (USB/DIN), routing data, and forwarding raw MIDI bytes over USB serial.
+
+- **MIDI bridge program (host-side)**  
+  A software component running on the host system (e.g., Raspberry Pi), such as [`uno-midi-bridge`](https://github.com/jeong0449/uno-midi-bridge),  
+  which converts raw serial MIDI data into ALSA MIDI streams.
+
+These components together form the complete MIDI input pipeline used in the Fluid Ardule system.
 
 ---
 
@@ -114,15 +131,17 @@ This transforms UNO-2 into a:
 
 All MIDI data is also output via the UNO's USB-serial interface.
 
-This allows external systems (e.g., Raspberry Pi) to use the stream by:
+This raw MIDI stream is intended to be consumed by host-side software (e.g., on a Raspberry Pi), where it can be converted into standard ALSA MIDI streams.
 
-1. Reading raw MIDI bytes from `/dev/serial/by-id/...`
+Typical usage:
+
+1. Read raw MIDI bytes from `/dev/serial/by-id/...`
 2. Converting them to ALSA MIDI using a bridge program, [`uno-midi-bridge`](https://github.com/jeong0449/uno-midi-bridge)
 
 Example workflow:
 
 ```
-UNO-2 → USB-serial → C bridge → ALSA sequencer → FluidSynth
+UNO-2 → USB-serial → MIDI bridge (C or Python) → ALSA sequencer → FluidSynth
 ```
 
 ---
@@ -137,10 +156,19 @@ UNO-2 → USB-serial → C bridge → ALSA sequencer → FluidSynth
 
 ## 10. Version note
 
-v0.5 represents a major evolution:
+### v0.5
+v0.5 represents a major architectural evolution:
 
 > From: USB MIDI converter  
-> To:   MIDI router / MIDI bridge (USB + DIN unified)
+> To:   unified USB + DIN MIDI router/bridge
+
+### v0.6
+v0.6 formalizes the terminology and defines the device as a:
+
+> **MIDI Router**
+
+The term *router* is now used consistently to describe the role of UNO-2 as a unified MIDI input and routing engine,  
+while the term *bridge* is reserved for host-side software that converts serial MIDI into ALSA MIDI.
 
 ---
 
