@@ -1,5 +1,14 @@
-# ADP Specification  
+# ADP Specification
 **Ardule Drum Pattern Binary Format (ADP)**
+
+> **First published:** Original ADP v2.2 specification
+>
+> **Documentation revision:** 2026-07-21
+>
+> The binary header and payload layout in this document were verified
+> against the APS reference implementation (`aps_core.py`).
+> This revision documents the existing ADP v2.2 format only.
+> **No changes have been made to the binary file format itself.**
 
 ## 1. Introduction
 
@@ -36,12 +45,15 @@ Non-goals:
 
 ## 3. Pattern Model
 
-- An ADP file represents **exactly one pattern**
-- Pattern length is **fixed (2 bars)**
+- An ADP file represents **exactly one drum pattern**
+- The pattern consists of a fixed number of discrete playback steps
+- In ADP v2.2, this corresponds to the complete pattern exported from an ADT file
 - Timing is grid-based
 - Playback is inherently looped
 
-The pattern identity and length are intrinsic properties of ADP.
+The musical time signature is intentionally **not** stored in ADP.
+Playback engines interpret the pattern solely from the stored step count,
+grid type, and timing parameters.
 
 ---
 
@@ -58,19 +70,32 @@ All numeric values are stored in **little-endian** byte order.
 
 ## 5. File Header
 
-The header defines global properties of the pattern.
+The ADP v2.2 binary header consists of the following fields.
 
-Typical fields include:
+### 5.1 Binary Header Layout
 
-- Magic identifier (`ADP`)
-- Format version
-- Grid code
-- Pattern length (bars)
-- Number of slots (instruments)
-- PPQ (pulses per quarter note)
-- Reserved bytes for future use
+The header size is fixed at **20 bytes**.
 
-The header fully describes how the event data must be interpreted.
+| Offset | Size | Field | Description |
+|------:|----:|-------|-------------|
+|0x00|4|Magic|`ADP2`|
+|0x04|1|Version|Format version (22 = v2.2)|
+|0x05|1|Grid Code|0=16, 1=8T, 2=16T|
+|0x06|1|Length|Pattern length in **steps**|
+|0x07|1|Slots|Number of drum slots|
+|0x08|2|PPQN|Pulses per quarter note|
+|0x0A|1|Swing|Playback parameter (currently unused)|
+|0x0B|2|Tempo|Optional tempo field|
+|0x0D|1|Reserved|Reserved for future expansion|
+|0x0E|2|ADT CRC|CRC of the source ADT|
+|0x10|4|Payload Bytes|Length of event payload in bytes|
+
+### 5.2 Header Notes
+
+- All numeric values are little-endian.
+- `Length` stores the total number of playback steps, not bars.
+- ADP intentionally does **not** store the musical time signature.
+- The header completely defines how the payload is decoded.
 
 ---
 
@@ -89,19 +114,22 @@ For each step:
 1. Hit count is stored
 2. Each hit is encoded as a packed byte
 
-### 6.3 Packed Hit Byte
+### 6.3 Payload Structure
 
-A packed hit byte encodes:
+For each playback step:
 
-- Slot index (instrument)
-- Accent (velocity level)
+1. One byte stores the number of hits.
+2. The corresponding packed hit bytes immediately follow.
 
-Typical layout:
+### 6.4 Packed Hit Byte
 
-- Lower bits: slot index
-- Upper bits: accent level (acc)
+Each hit occupies one byte.
 
-Exact bit allocation is implementation-defined but consistent across tools.
+| Bits | Meaning |
+|------|---------|
+|7–6|Reserved|
+|5–2|Slot index (0–15)|
+|1–0|Accent level (0–3)|
 
 ---
 
