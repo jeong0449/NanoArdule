@@ -131,6 +131,39 @@ Each hit occupies one byte.
 |5–2|Slot index (0–15)|
 |1–0|Accent level (0–3)|
 
+### 6.5 Slot Interpretation
+
+> **Note — Drum Slot Interpretation**
+>
+> ADP stores only **slot indices** and **accent levels** for each drum event.
+>
+> The percussion instrument assigned to each slot is **not stored** in the ADP file.
+>
+> Therefore, an ADP playback engine assumes that both the encoder and the decoder share the same predefined slot ordering.
+>
+> The ADP specification intentionally does **not** define which percussion instrument corresponds to each slot.
+> The slot assignment is determined by the authoring environment and the playback implementation.
+>
+> Current ADP implementations assume the following default slot ordering:
+>
+> | Slot | MIDI Note | Instrument |
+> |-----:|----------:|------------|
+> | 0 | 36 | Kick |
+> | 1 | 38 | Snare |
+> | 2 | 42 | Closed Hi-Hat |
+> | 3 | 46 | Open Hi-Hat |
+> | 4 | 45 | Low Tom |
+> | 5 | 47 | Mid Tom |
+> | 6 | 50 | High Tom |
+> | 7 | 51 | Ride Cymbal |
+> | 8 | 49 | Crash Cymbal |
+> | 9 | 37 | Rim Shot |
+> | 10 | 39 | Hand Clap |
+> | 11 | 44 | Pedal Hi-Hat |
+>
+> This ordering reflects the current implementation and is not yet defined as a formal part of the ADP specification.
+> Future versions of the ecosystem may standardize this ordering explicitly while preserving the ADP binary format.
+
 ---
 
 ## 7. Velocity Levels
