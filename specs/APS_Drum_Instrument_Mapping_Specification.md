@@ -1,7 +1,7 @@
 # APS Drum Instrument Sets & Pad Mapping — Reference Specification
 
-**Version:** v1.0
-**Date:** 2026-02-09
+**Version:** v1.1
+**Creation Date:** 2026-02-09 (updated 2026-07-26)
 **Status:** Reference / Implementation-level Specification
 
 ---
@@ -9,14 +9,6 @@
 ## 1. Scope and Purpose
 
 This document defines the **reference drum instrument sets and pad mappings** used by APS-based editors and controllers.
-
-It specifies:
-
-* Canonical instrument groupings (categories)
-* The *APS Default 12* instrument set
-* The legacy UI instrument set
-* The reference pad mapping for **AKAI MPK MINI (16 pads)**
-
 This specification is **non-normative with respect to the ADT format**.
 ADT intentionally defines *instrument slots* without binding them to concrete instrument identities.
 
@@ -111,7 +103,7 @@ Implementations MUST NOT reorder selected instruments.
 This guarantees consistent slot numbering across ADT editors, ADP encoders,
 and playback engines.
 
-| Category           | Instrument     | Legacy UI Set | APS Default 12 | MPK MINI Pad 16 | Pad Location |
+| Category           | Instrument     | Legacy UI 12 | (APS Default 12) | MPK MINI Pad 16 | Pad Location |
 | ------------------ | -------------- | ------------- | -------------- | --------------- | ------------ |
 | Core               | KK (36) KICK   | O             | O              | O               | Core         |
 |                    | SN (38) SNARE  | O             | O              | O               | Core         |
@@ -141,7 +133,7 @@ and playback engines.
 ## 6. Design Rationale (Informative)
 
 * **Core instruments are immutable** and must always remain visible in StepSeq.
-* **APS Default 12** balances expressive power with UI and hardware constraints.
+* **Legacy UI 12** balances expressive power with UI and hardware constraints.
 * Pad layouts prioritize *physical playability* and *real drum-set ergonomics* over pitch ordering.
 
 ---
