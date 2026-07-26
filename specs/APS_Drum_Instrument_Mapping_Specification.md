@@ -53,7 +53,8 @@ APS implementations, including APS editors, StepSeq, and ADP playback.
 ### 4.2 Additional Slot Maps
 
 APS may define additional 12-slot instrument sets for specialized musical styles
-or workflows.
+or workflows. Each additional slot map SHALL preserve the canonical ordering defined in
+Section 5.
 
 Examples include:
 
