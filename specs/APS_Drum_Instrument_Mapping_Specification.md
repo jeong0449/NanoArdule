@@ -40,7 +40,17 @@ APS instruments are grouped by functional role rather than timbre or MIDI number
 
 ## 4. Reference Instrument Sets
 
-### 4.1 Legacy UI 12 (Default)
+### 4.1 Core Instrument Set
+
+The **Core Instrument Set** consists of the instruments classified under the
+**Core** category in the reference table.
+
+It is **not** a complete instrument set. Instead, it defines the mandatory
+subset shared by all APS 12-slot instrument sets.
+
+Every APS 12-slot instrument set SHALL include all Core instruments.
+
+### 4.2 Legacy UI 12 (Default)
 
 The **Legacy UI 12** defines the default 12-slot instrument set used by current
 APS implementations, including APS editors, StepSeq, and ADP playback.
@@ -50,7 +60,7 @@ APS implementations, including APS editors, StepSeq, and ADP playback.
 * Default slot map for ADP patterns unless another slot map is explicitly specified
 * Forms the baseline for automatic row registration
 
-### 4.2 Additional Slot Maps
+### 4.3 Additional Slot Maps
 
 APS may define additional 12-slot instrument sets for specialized musical styles
 or workflows. Each additional slot map SHALL preserve the canonical ordering defined in
@@ -65,7 +75,7 @@ Examples include:
 These slot maps are selected explicitly and remain fully compatible with the
 ADT slot model.
 
-### 4.3 MPK MINI Pad 16 Set
+### 4.4 MPK MINI Pad 16 Set
 
 The **MPK MINI Pad 16 Set** defines a reference physical mapping for 4×4 pad controllers.
 
