@@ -48,20 +48,29 @@ APS instruments are grouped by functional role rather than timbre or MIDI number
 
 ## 4. Reference Instrument Sets
 
-### 4.1 APS Default 12
+### 4.1 Legacy UI 12 (Default)
 
-The **APS Default 12** defines the canonical instrument set used by APS editors and StepSeq.
+The **Legacy UI 12** defines the default 12-slot instrument set used by current
+APS implementations, including APS editors, StepSeq, and ADP playback.
 
 * Maximum of 12 instruments
-* Always includes all *Core* instruments
+* Includes all core drum instruments
+* Default slot map for ADP patterns unless another slot map is explicitly specified
 * Forms the baseline for automatic row registration
 
-### 4.2 Legacy UI Set
+### 4.2 Additional Slot Maps
 
-The **Legacy UI Set** documents instruments historically exposed in earlier APS grid-based UIs.
+APS may define additional 12-slot instrument sets for specialized musical styles
+or workflows.
 
-* Provided for backward reference only
-* Not required to be supported by new controllers
+Examples include:
+
+* Latin 12
+* Electronic 12
+* Brush 12
+
+These slot maps are selected explicitly and remain fully compatible with the
+ADT slot model.
 
 ### 4.3 MPK MINI Pad 16 Set
 
@@ -70,9 +79,37 @@ The **MPK MINI Pad 16 Set** defines a reference physical mapping for 4×4 pad co
 * Core instruments occupy the lower pad row
 * Upper rows are organized by functional category
 
+### Historical Note — APS Default 12
+
+During the early design of APS, the **APS Default 12** was envisioned as a future
+canonical 12-slot instrument set independent of any particular user interface.
+It was intended to provide a clean, musically balanced default while allowing
+multiple alternative slot maps to coexist.
+
+As the project evolved, however, the original **Legacy UI 12** layout became the
+de facto standard across APS editors, StepSeq, ADP playback, and related tools.
+Its widespread adoption and backward compatibility made it the natural default
+instrument set for the APS ecosystem.
+
+Consequently, the concept of **APS Default 12** was retired before formal
+standardization. The name remains reserved for possible future use should a new
+canonical instrument set ever become desirable.
+
 ---
 
 ## 5. Reference Table
+
+### 5.1 Ordering Rule
+
+For every APS 12-slot instrument set, the instrument order is normative.
+
+When an instrument set selects a subset of instruments from the reference table,
+the relative ordering defined below SHALL be preserved.
+
+Implementations MUST NOT reorder selected instruments.
+
+This guarantees consistent slot numbering across ADT editors, ADP encoders,
+and playback engines.
 
 | Category           | Instrument     | Legacy UI Set | APS Default 12 | MPK MINI Pad 16 | Pad Location |
 | ------------------ | -------------- | ------------- | -------------- | --------------- | ------------ |
