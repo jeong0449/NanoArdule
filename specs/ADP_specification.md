@@ -3,7 +3,7 @@
 
 > **First published:** Original ADP v2.2 specification
 >
-> **Documentation revision:** 2026-07-21
+> **Documentation revision:** 2026-07-27
 >
 > The binary header and payload layout in this document were verified
 > against the APS reference implementation (`aps_core.py`).
@@ -84,9 +84,9 @@ The header size is fixed at **20 bytes**.
 |0x06|1|Length|Pattern length in **steps**|
 |0x07|1|Slots|Number of drum slots|
 |0x08|2|PPQN|Pulses per quarter note|
-|0x0A|1|Swing|Playback parameter (currently unused)|
-|0x0B|2|Tempo|Optional tempo field|
-|0x0D|1|Reserved|Reserved for future expansion|
+|0x0A|1|Reserved|Reserved for future playback extensions (must be `0` in v2.2)|
+|0x0B|2|Tempo|Optional playback tempo (`0` = unspecified)|
+|0x0D|1|Instrument Set ID|Percussion layout/profile identifier (`0`=Legacy UI 12, `1`=APS Default 12)|
 |0x0E|2|ADT CRC|CRC of the source ADT|
 |0x10|4|Payload Bytes|Length of event payload in bytes|
 
