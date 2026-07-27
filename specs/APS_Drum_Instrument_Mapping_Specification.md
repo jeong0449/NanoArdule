@@ -1,7 +1,7 @@
 # APS Drum Instrument Sets & Pad Mapping — Reference Specification
 
 **Version:** v1.1
-**Creation Date:** 2026-02-09 (updated 2026-07-26)
+**Creation Date:** 2026-02-09 (updated 2026-07-27)
 **Status:** Reference / Implementation-level Specification
 
 ---
@@ -133,6 +133,50 @@ and playback engines.
 |                    | HW (76) WBLK_H |               |                | O               | Upper_3C     |
 |                    | SP (55) SPLASH |               |                | O               | Upper_3D     |
 | Legacy / Optional  | PH (44) HH_PED | O             |                |                 | —            |
+
+#### 5.1.1 Instrument Naming
+
+The instrument definition consists of three independent components:
+
+```text
+<SHORT>@<MIDI_NOTE>,<LONG_NAME>
+```
+
+Example:
+
+```text
+SN@38,SNARE
+```
+
+where:
+
+- `SHORT` is a two-character mnemonic used for compact pattern notation.
+- `MIDI_NOTE` is the General MIDI percussion note number and is the authoritative instrument identifier.
+- `LONG_NAME` is a human-readable display name.
+
+Only the MIDI note number determines the instrument's musical meaning. The `SHORT` and `LONG_NAME` fields are descriptive metadata and may be changed in future revisions without affecting playback compatibility.
+
+For example, the following definitions are musically equivalent:
+
+```text
+RM@37,RIM
+RM@37,SIDEST
+SS@37,SIDEST
+```
+
+All three represent General MIDI Note 37 and therefore produce identical playback.
+
+##### Possible Future Name Updates
+
+The following naming changes may be considered in future revisions to improve readability while preserving complete compatibility.
+
+| Current | Proposed | Notes |
+|---------|----------|-------|
+| `RM@37,RIM` | `RM@37,SIDEST` | Reflects the GM instrument name (Side Stick). |
+| `CB@56,COWBL` | `CB@56,COWBEL` | Uses the full six-character abbreviation. |
+| `SH@82,SHAKR` | `SH@82,SHAKER` | Improves readability while remaining within six characters. |
+
+These are documentation improvements only. Existing ADT files remain fully compatible because instrument identity is determined solely by the MIDI note number.
 
 ### APS StepSeq - 4x4 Keyboard Grid Layout
 <p align="center">
