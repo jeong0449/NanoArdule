@@ -125,11 +125,11 @@ and playback engines.
 |                    | HT (50) TOM_H  | O             | O              | O               | Upper_2D     |
 |                    | CR (49) CRASH  | O             | O              | O               | Upper_1A     |
 |                    | RD (51) RIDE   | O             | O              | O               | Upper_1D     |
-| Rhythmic Perc      | CL (39) CLAP   | O             | O              | O               | Upper_2A     |
+| Rhythmic Perc      | CL (39) CLAP   | O             | O -> X         | O               | Upper_2A     |
 |                    | TA (54) TAMB   |               | O              | O               | Upper_2B     |
-|                    | CB (56) COWBL  |               | O              | O               | Upper_2C     |
-| Color / FX         | RM (37) RIM    | O             |                | O               | Upper_3A     |
-|                    | SH (82) SHAKR  |               |                | O               | Upper_3B     |
+|                    | CB (56) COWBL  |               | O -> X         | O               | Upper_2C     |
+| Color / FX         | RM (37) RIM    | O             | [O]            | O               | Upper_3A     |
+|                    | SH (82) SHAKR  |               | [O]            | O               | Upper_3B     |
 |                    | HW (76) WBLK_H |               |                | O               | Upper_3C     |
 |                    | SP (55) SPLASH |               |                | O               | Upper_3D     |
 | Legacy / Optional  | PH (44) HH_PED | O             |                |                 | —            |
