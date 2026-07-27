@@ -1,8 +1,8 @@
 # APS Drum Instrument Sets & Pad Mapping — Reference Specification
 
-**Version:** v1.1
-**Creation Date:** 2026-02-09 (updated 2026-07-27)
-**Status:** Reference / Implementation-level Specification
+* **Version:** v1.1 
+* **Creation Date:** 2026-02-09 (updated 2026-07-27) 
+* **Status:** Reference / Implementation-level Specification
 
 ---
 
