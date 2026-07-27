@@ -16,7 +16,7 @@ ADT intentionally defines *instrument slots* without binding them to concrete in
 
 ## 2. Terminology
 
-* **ADT**: Ardule Drum Track format
+* **ADT**: Ardule Drum Pattern Text format
 * **APS**: Ardule Pattern Studio
 * **Instrument Slot**: A logical drum role defined in ADT (maximum 12)
 * **Instrument Set**: A concrete assignment of musical instruments to slots
