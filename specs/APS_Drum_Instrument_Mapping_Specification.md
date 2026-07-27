@@ -32,7 +32,7 @@ APS instruments are grouped by functional role rather than timbre or MIDI number
 | ------------------ | -------------------------------------------- |
 | Core               | Timekeeping backbone, always preserved       |
 | Fills / Transition | Drum fills and sectional transitions         |
-| Rhythmic Perc      | Percussion directly shaping groove           |
+| Rhythmic Perc      | Percussion instruments reinforcing the rhythmic groove           |
 | Color / FX         | Texture, accents, and decorative sounds      |
 | Legacy / Optional  | Historically present or optional instruments |
 
