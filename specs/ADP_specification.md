@@ -84,9 +84,9 @@ The header size is fixed at **20 bytes**.
 |0x06|1|Length|Pattern length in **steps**|
 |0x07|1|Slots|Number of drum slots|
 |0x08|2|PPQN|Pulses per quarter note|
-|0x0A|1|Reserved|Reserved for future playback extensions (must be `0` in v2.2)|
-|0x0B|2|Tempo|Optional playback tempo (`0` = unspecified)|
-|0x0D|1|Instrument Set ID|Percussion layout/profile identifier (`0`=Legacy UI 12, `1`=APS Default 12)|
+|0x0A|1|Reserved|Reserved (write `0`)|
+|0x0B|2|Tempo|Optional tempo (`0` if unspecified)|
+|0x0D|1|Instrument Set ID|0=Legacy UI 12, 1=APS Default 12|
 |0x0E|2|ADT CRC|CRC of the source ADT|
 |0x10|4|Payload Bytes|Length of event payload in bytes|
 
