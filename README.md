@@ -143,6 +143,31 @@ python .\tools\adc-arrtool.py --format both .\patterns\SONG_001.ARR --countin 4
 
 ---
 
+## 6. Current Development
+
+The Ardule ecosystem is currently undergoing a major evolution driven by the analysis of real-world MIDI drum performances.
+
+While the original Nano Ardule firmware introduced a lightweight 12-slot drum representation optimized for Arduino-class hardware, large-scale analysis of commercially available MIDI drum patterns has revealed that this simplified model does not always represent General MIDI percussion accurately.
+
+In particular, some tom assignments and auxiliary percussion instruments were grouped too aggressively, making certain patterns difficult to reproduce faithfully. This limitation was not obvious during the original firmware development, but became apparent only after thousands of real drum events were examined.
+
+Rather than replacing the existing ADT/ADP formats, the current ADC Toolchain introduces an analysis-first workflow:
+
+1. Analyze the original MIDI performance without information loss.
+2. Detect time signatures, subdivisions, pattern boundaries, drum slots, and expressive ornaments.
+3. Store the analysis as an intermediate report.
+4. Generate ADT/ADP files and other archive assets from the validated analysis.
+
+This architecture preserves complete backward compatibility with existing Nano Ardule firmware while allowing the pattern archive to evolve independently of historical hardware constraints.
+
+The long-term goal is to build a curated, high-quality drum pattern archive that serves Nano Ardule, APS, Fluid Ardule, and future members of the Ardule ecosystem.
+
+> **Historical note**
+>
+> The original fixed 12-slot layout was an engineering trade-off made for small AVR microcontrollers with extremely limited RAM and flash memory. It successfully achieved its original goal of compact embedded playback. The current work is not intended to replace that design, but to complement it with a richer analysis pipeline based on extensive MIDI corpus validation.
+
+---
+
 # 🥁 Pattern Library
 
 Includes (or supports) 2-bar patterns across genres:
