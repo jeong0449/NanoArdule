@@ -109,4 +109,6 @@ All note events, note timing, velocities, durations, and musical performance rem
 
 The original **6MISC2.MID** has been superseded by **6MISC3.MID** and **6WALTZ.MID**.
 
-Since both replacement files preserve the complete musical content of the original while providing consistent time signatures, **6MISC2.MID is no longer required and may be safely removed from the pattern archive.**
+Both replacement files preserve the complete musical content of the original while providing consistent time signatures and improved compatibility with analysis tools.
+
+**The original 6MISC2.MID may be retained for historical reference or removed from the archive at the maintainer's discretion.**
