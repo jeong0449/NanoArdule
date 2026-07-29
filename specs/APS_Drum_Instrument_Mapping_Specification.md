@@ -40,6 +40,14 @@ APS instruments are grouped by functional role rather than timbre or MIDI number
 
 ## 4. Reference Instrument Sets
 
+### Design Basis
+
+All reference slot maps were derived through extensive analysis of a large collection of real-world drum pattern MIDI files obtained from diverse sources.
+
+Rather than being designed from theoretical assumptions, each slot map was iteratively refined to maximize practical coverage, preserve musical intent, and minimize information loss during conversion to the ADT slot model.
+
+This empirical approach ensures that the reference slot maps reflect common usage found in actual drum patterns while remaining simple, consistent, and suitable for automated processing.
+
 ### 4.1 Core Instrument Set
 
 The **Core Instrument Set** consists of the instruments classified under the
@@ -62,18 +70,22 @@ APS implementations, including APS editors, StepSeq, and ADP playback.
 
 ### 4.3 Additional Slot Maps
 
-APS may define additional 12-slot instrument sets for specialized musical styles
-or workflows. Each additional slot map SHALL preserve the canonical ordering defined in
-Section 5.
+APS currently defines the following reference slot maps.
 
-Examples include:
+| Slot Map ID | Name   | Description |
+|-------------|--------|-------------|
+| 0 | LEGACY | Default 12-slot map used by ADT/ADP and existing APS implementations. |
+| 1 | RAP    | Hip-hop / electronic percussion extension. |
+| 2 | ADD1   | Auxiliary percussion set #1. |
+| 3 | ADD2   | Auxiliary percussion set #2. |
+| 4 | ADD3   | Auxiliary percussion set #3. |
+| 5 | ADD4   | Auxiliary percussion set #4. |
 
-* Latin 12
-* Electronic 12
-* Brush 12
+The slot map definitions are maintained in the canonical JSON file
+`slot_map_definitions.json`.
 
-These slot maps are selected explicitly and remain fully compatible with the
-ADT slot model.
+Applications SHALL obtain slot map definitions from this JSON file rather
+than embedding duplicated mappings in source code.
 
 ### 4.4 MPK MINI Pad 16 Set
 
@@ -97,6 +109,27 @@ instrument set for the APS ecosystem.
 Consequently, the concept of **APS Default 12** was retired before formal
 standardization. The name remains reserved for possible future use should a new
 canonical instrument set ever become desirable.
+
+### Canonical Slot Map Definition
+
+This specification describes the conceptual instrument sets.
+
+The normative implementation is provided by the companion file
+
+`slot_map_definitions.json`
+
+which defines:
+
+- slot_map_id
+- slot order
+- abbreviations
+- representative MIDI note
+- accepted MIDI note aliases
+- display names
+
+Implementations SHALL treat the JSON file as the single source of truth.
+
+Documentation tables are informative and must remain consistent with the JSON definition.
 
 ---
 
@@ -207,3 +240,13 @@ This specification follows independent semantic versioning.
 * ADT v2.2 Specification
 * APS User Manual
 * AKAI MPK MINI Controller Documentation
+
+---
+## Revision History
+
+### v1.2 (2026-07-29)
+
+- Defined six canonical slot maps (IDs 0–5).
+- Declared `slot_map_definitions.json` as the normative slot map definition.
+- Clarified that applications should load slot maps from JSON instead of embedding duplicated tables.
+- Documentation tables are informative and synchronized with the JSON definition.
