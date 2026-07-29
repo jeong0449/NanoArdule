@@ -250,7 +250,7 @@
       {
         "slot": 10,
         "abbrev": "CB",
-        "extended": "COWBELL",
+        "extended": "COWBEL",
         "representative_midi": 56,
         "midi_input_allowed": [
           56
@@ -350,8 +350,8 @@
       },
       {
         "slot": 7,
-        "abbrev": "P54",
-        "extended": "TAMBOURINE",
+        "abbrev": "TB",
+        "extended": "TAMB",
         "representative_midi": 54,
         "midi_input_allowed": [
           54
@@ -360,8 +360,8 @@
       },
       {
         "slot": 8,
-        "abbrev": "P56",
-        "extended": "COWBELL",
+        "abbrev": "CB",
+        "extended": "COWBEL",
         "representative_midi": 56,
         "midi_input_allowed": [
           56
@@ -370,8 +370,8 @@
       },
       {
         "slot": 9,
-        "abbrev": "P58",
-        "extended": "VIBRASLAP",
+        "abbrev": "VS",
+        "extended": "V_SLAP",
         "representative_midi": 58,
         "midi_input_allowed": [
           58
@@ -380,8 +380,8 @@
       },
       {
         "slot": 10,
-        "abbrev": "P70",
-        "extended": "MARACAS",
+        "abbrev": "MA",
+        "extended": "MARACA",
         "representative_midi": 70,
         "midi_input_allowed": [
           70
@@ -390,8 +390,8 @@
       },
       {
         "slot": 11,
-        "abbrev": "P77",
-        "extended": "LOW_WOOD_BLOCK",
+        "abbrev": "WB",
+        "extended": "WB_LO",
         "representative_midi": 77,
         "midi_input_allowed": [
           77
@@ -485,8 +485,8 @@
       },
       {
         "slot": 7,
-        "abbrev": "P56",
-        "extended": "COWBELL",
+        "abbrev": "CB",
+        "extended": "COWBEL",
         "representative_midi": 56,
         "midi_input_allowed": [
           56
@@ -495,8 +495,8 @@
       },
       {
         "slot": 8,
-        "abbrev": "P67",
-        "extended": "HIGH_AGOGO",
+        "abbrev": "AH",
+        "extended": "AG_HI",
         "representative_midi": 67,
         "midi_input_allowed": [
           67
@@ -505,8 +505,8 @@
       },
       {
         "slot": 9,
-        "abbrev": "P68",
-        "extended": "LOW_AGOGO",
+        "abbrev": "AL",
+        "extended": "AG_LO",
         "representative_midi": 68,
         "midi_input_allowed": [
           68
@@ -595,8 +595,8 @@
       },
       {
         "slot": 7,
-        "abbrev": "P60",
-        "extended": "HI_BONGO",
+        "abbrev": "BH",
+        "extended": "BG_HI",
         "representative_midi": 60,
         "midi_input_allowed": [
           60
@@ -605,8 +605,8 @@
       },
       {
         "slot": 8,
-        "abbrev": "P61",
-        "extended": "LOW_BONGO",
+        "abbrev": "BL",
+        "extended": "BG_LO",
         "representative_midi": 61,
         "midi_input_allowed": [
           61
@@ -615,8 +615,8 @@
       },
       {
         "slot": 9,
-        "abbrev": "P62",
-        "extended": "MUTE_HI_CONGA",
+        "abbrev": "CM",
+        "extended": "CG_MH",
         "representative_midi": 62,
         "midi_input_allowed": [
           62
@@ -625,8 +625,8 @@
       },
       {
         "slot": 10,
-        "abbrev": "P63",
-        "extended": "OPEN_HI_CONGA",
+        "abbrev": "CO",
+        "extended": "CG_OH",
         "representative_midi": 63,
         "midi_input_allowed": [
           63
@@ -635,8 +635,8 @@
       },
       {
         "slot": 11,
-        "abbrev": "P64",
-        "extended": "LOW_CONGA",
+        "abbrev": "CG",
+        "extended": "CG_LO",
         "representative_midi": 64,
         "midi_input_allowed": [
           64
@@ -671,8 +671,8 @@
       },
       {
         "slot": 2,
-        "abbrev": "P56",
-        "extended": "COWBELL",
+        "abbrev": "CB",
+        "extended": "COWBEL",
         "representative_midi": 56,
         "midi_input_allowed": [
           56
@@ -681,8 +681,8 @@
       },
       {
         "slot": 3,
-        "abbrev": "P62",
-        "extended": "MUTE_HI_CONGA",
+        "abbrev": "CM",
+        "extended": "CG_MH",
         "representative_midi": 62,
         "midi_input_allowed": [
           62
@@ -691,8 +691,8 @@
       },
       {
         "slot": 4,
-        "abbrev": "P63",
-        "extended": "OPEN_HI_CONGA",
+        "abbrev": "CO",
+        "extended": "CG_OH",
         "representative_midi": 63,
         "midi_input_allowed": [
           63
@@ -701,8 +701,8 @@
       },
       {
         "slot": 5,
-        "abbrev": "P64",
-        "extended": "LOW_CONGA",
+        "abbrev": "CG",
+        "extended": "CG_LO",
         "representative_midi": 64,
         "midi_input_allowed": [
           64
@@ -711,8 +711,8 @@
       },
       {
         "slot": 6,
-        "abbrev": "P65",
-        "extended": "HIGH_TIMBALE",
+        "abbrev": "TH",
+        "extended": "TL_HI",
         "representative_midi": 65,
         "midi_input_allowed": [
           65
@@ -721,8 +721,8 @@
       },
       {
         "slot": 7,
-        "abbrev": "P66",
-        "extended": "LOW_TIMBALE",
+        "abbrev": "TL",
+        "extended": "TL_LO",
         "representative_midi": 66,
         "midi_input_allowed": [
           66
@@ -731,8 +731,8 @@
       },
       {
         "slot": 8,
-        "abbrev": "P67",
-        "extended": "HIGH_AGOGO",
+        "abbrev": "AH",
+        "extended": "AG_HI",
         "representative_midi": 67,
         "midi_input_allowed": [
           67
@@ -741,8 +741,8 @@
       },
       {
         "slot": 9,
-        "abbrev": "P68",
-        "extended": "LOW_AGOGO",
+        "abbrev": "AL",
+        "extended": "AG_LO",
         "representative_midi": 68,
         "midi_input_allowed": [
           68
