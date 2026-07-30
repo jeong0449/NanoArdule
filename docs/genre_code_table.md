@@ -25,12 +25,12 @@ The slicer script infers the code from the input MIDI filename using simple keyw
 | REG  | Reggae |
 | MTL  | Metal |
 | HHP  | Hip-Hop |
+| RAP  | Rap |
 | RNB  | R&B (Rhythm & Blues) |
 | EDM  | EDM / Dance |
 | HSE  | House |
 | TNO  | Techno |
 | DRM  | Drums (default / fallback) |
-
 
 ## Where this comes from
 
