@@ -1,9 +1,11 @@
-# Genre Code Table (from `adc-split-drum-2bar-save.py`)
+# Genre Code Table
 
 This project uses a short **3-letter genre code** as the prefix of generated pattern filenames, e.g. `RCK_P001.MID`.
-The slicer script infers the code from the input MIDI filename using simple keyword matching.
+The initial genre code is inferred from the input MIDI filename using a set of keyword-based regular expressions.
 
-> Note: These codes are used for **naming and indexing** only. They do not affect MIDI content.
+> **Note:** These codes are used for **naming and indexing** only. They do not affect the MIDI content itself.
+>
+> The original genre inference function was implemented in `adc-split-drum-2bar-save.py` to assist with automatic file naming during MIDI splitting. As PatternLab evolved into the primary inspection and editing tool within the ADX ecosystem, this functionality was taken over by `adc-patternlab.py` and significantly enhanced. The current implementation supports a broader set of genre keywords, improved regular-expression matching, and more robust handling of edge cases. At the time of writing, these latest enhancements have not yet been committed to the public repository.
 
 ## Genre Codes
 
@@ -31,13 +33,6 @@ The slicer script infers the code from the input MIDI filename using simple keyw
 | HSE  | House |
 | TNO  | Techno |
 | DRM  | Drums (default / fallback) |
-
-## Where this comes from
-
-The mapping is defined in the `GENRE_MAP` section of `adc-split-drum-2bar-save.py`.
-If no keyword matches, the script falls back to the default code `DRM`.
-
-Source: `adc-split-drum-2bar-save.py`.
 
 ## Inferring Genre Codes from MIDI Filenames
 
@@ -118,4 +113,4 @@ Example:
 'DRM'
 ```
 
-The purpose of this function is not to perform detailed musical genre classification, but to preserve useful metadata already embedded in MIDI filenames. The inferred genre serves as the initial value in PatternLab and can be changed by the user before exporting ADT or ADP files.
+The purpose of this function is not to perform rigorous musical genre classification, but to preserve useful information already embedded in MIDI filenames. The inferred genre serves as the initial value in PatternLab and may be changed by the user before exporting ADT or ADP files.
