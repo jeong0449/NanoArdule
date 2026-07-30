@@ -1,133 +1,151 @@
 # ADT v2.2a Specification
 **Ardule Drum Text Format**
 
-> Version: v2.2a  
-> Status: Stable / Public specification
+> Version: v2.2a
+> Status: Stable / Public Specification
+>
+> **Revision (2026-07-31)**
+>
+> This document has been revised to accurately describe the current ADT v2.2a
+> implementation used by the Ardule Drum Patternology ecosystem. No file format
+> changes have been introduced. This revision updates terminology, metadata
+> definitions, examples, and parsing rules while maintaining full backward
+> compatibility with existing ADT v2.2a files.
 
 ---
 
-## 1. Introduction
+# 1. Introduction
 
-ADT (Ardule Drum Text) is a human-readable text format for representing
-**two-bar drum patterns** on a fixed rhythmic grid.
+ADT (Ardule Drum Text) is a human-readable text format for representing drum
+patterns. It is intended to be simple enough for manual editing while remaining
+easy to parse by software.
 
-This document defines the **authoritative specification** of ADT v2.2a.
-
----
-
-## 2. Core Concepts
-
-An ADT pattern represents:
-- Exactly **2 bars**
-- A **fixed grid** (straight or triplet)
-- A set of **drum slots** (one instrument per row)
-- **Relative velocity levels** per step
+An ADT file consists of metadata, slot definitions and a pattern body.
 
 ---
 
-## 3. File Structure
+# 2. Core Concepts
 
-An ADT file consists of:
-1. Header (metadata)
+An ADT pattern contains:
+
+- Musical metadata
+- A rhythmic grid
+- Drum slot definitions
+- Relative velocity symbols
+- Pattern data
+
+ADT represents musical structure rather than MIDI events.
+
+---
+
+# 3. File Structure
+
+An ADT file is composed of:
+
+1. Header (KEY=VALUE pairs)
 2. Slot definitions
 3. Pattern body
 
----
-
-## 4. Header Section
-
-Header lines start with `#`.
-
-Common fields:
-- `GRID`   : grid type
-- `LENGTH` : total steps (always 2 bars)
-- `TS`     : time signature (semantic hint)
-- `BPM`    : tempo hint
-- `KIT`    : drum kit hint
+Comment lines begin with ';'.
 
 ---
 
-## 5. Grid and Length
+# 4. Header
 
-| GRID | Meaning | LENGTH |
-|------|--------|--------|
-| 16   | Straight 16th grid | 32 |
-| 8T   | 8th-note triplet grid | 24 |
-| 16T  | 16th-note triplet grid | 48 |
+Header fields use:
 
----
+KEY=VALUE
 
-## 6. Slot Definitions
+Common fields
 
-```
-SLOT <NAME> <MIDI_NOTE>
-```
-
----
-
-## 7. Velocity Representation
-
-ADT defines **four velocity levels**, represented by symbols:
-
-| Level | Meaning | Symbol |
-|------:|--------|--------|
-| 0 | Rest | `.` |
-| 1 | Soft | `-` |
-| 2 | Medium | `x` / `X` |
-| 3 | Strong | `o` / `O` |
-
-Canonical order (low → high):
-
-```
-.  -  x  o
-```
-
-Symbols are **case-insensitive**.
+| Field | Description |
+|------|-------------|
+| NAME | Pattern identifier |
+| TIME_SIG | Time signature (4/4, 3/4, 6/8...) |
+| GRID | Rhythmic grid |
+| LENGTH | Total stored steps |
+| SLOTS | Number of slot definitions |
+| KIT | Drum kit identifier |
+| ORIENTATION | STEP or SLOT |
 
 ---
 
-## 8. Recommended Velocity-to-MIDI Mapping
+# 5. GRID and LENGTH
 
-ADT encodes **relative** velocity only.  
-Playback engines and converters SHOULD map symbols to MIDI velocity
-using a consistent table.
+GRID specifies the **smallest rhythmic note value used to construct one beat**.
 
-### Recommended Default Mapping
+It does **not** indicate the number of subdivisions per beat.
 
-| Symbol | Level | Suggested MIDI Velocity |
-|--------|-------|--------------------------|
-| `.` | 0 | — (no note) |
-| `-` | 1 | 40–60 |
-| `x` / `X` | 2 | 80–100 |
-| `o` / `O` | 3 | 115–127 |
+Typical values are:
 
-Notes:
-- Exact values MAY be tuned per engine or kit
-- The table defines **relative loudness**, not absolute dynamics
-- Strong hits (`O`) SHOULD be clearly accented
+| GRID | Meaning | Steps per Beat |
+|------|---------|---------------:|
+|16|Sixteenth-note grid|4|
+|8T|Eighth-note triplet grid|3|
+|16T|Sixteenth-note triplet grid|6|
 
----
+LENGTH specifies the total number of stored pattern steps (one pattern = two bars).
 
-## 9. Pattern Body Rules
+Examples:
 
-- Each row contains exactly `LENGTH` symbols
-- Whitespace is ignored
-- One row represents a single logical slot
-- In rotated represntation, a row instead corresponds to an instrument layout
+| TIME_SIG | GRID | LENGTH |
+|----------|------|--------|
+|4/4|16|32|
+|3/4|16|24|
+|4/4|8T|24|
+|4/4|16T|48|
 
 ---
 
-## 10. Complete Example
+# 6. Slot Definitions
+
+Each slot uses:
+
+SLOTn=<SHORT>@<MIDI>,<LONG>
+
+Example
+
+SLOT0=KK@36,KICK
+SLOT1=SN@38,SNARE
+
+---
+
+# 7. Velocity Symbols
+
+| Symbol | Meaning |
+|--------|---------|
+| . | Rest |
+| - | Soft |
+| x/X | Medium |
+| o/O | Strong |
+
+Symbols are case-insensitive.
+
+---
+
+# 8. Pattern Body
+
+Each row contains exactly LENGTH symbols.
+
+Whitespace outside pattern symbols is ignored.
+
+When ORIENTATION=STEP each row represents one time step.
+
+When ORIENTATION=SLOT each row represents one instrument slot.
+
+---
+
+# 9. Example
 
 ```text
 ; ADT v2.2a
-NAME=BLU_P001
+NAME=AFC_B015
 TIME_SIG=4/4
-GRID=8T
-LENGTH=24
+GRID=16
+LENGTH=32
 SLOTS=12
 KIT=GM_STD
-ORIENTATION=SLOT
+ORIENTATION=STEP
 SLOT0=KK@36,KICK
 SLOT1=SN@38,SNARE
 SLOT2=CH@42,HH_CL
@@ -140,31 +158,35 @@ SLOT8=CR@49,CRASH
 SLOT9=RM@37,RIM
 SLOT10=CL@39,CLAP
 SLOT11=PH@44,HH_PED
-x.x..xx.x.xxx.x..xx.x.xx
-...x.....x.....x.....x..
-xxxxxxxxxxxxxxxxxxxxxxxx
-........................
-........................
-........................
-........................
-........................
-........................
-........................
-........................
-........................
-
+.-..........
+............
+.-..........
 ```
 
 ---
 
-## 11. Parsing and Playback
+# 10. Parsing
 
-- ADT encodes structure, not performance
-- Playback engines derive timing from GRID/LENGTH
-- Velocity mapping follows Section 8
+A parser shall:
+
+- Read metadata.
+- Read SLOT definitions.
+- Verify row lengths equal LENGTH.
+- Interpret GRID as rhythmic resolution.
+- Interpret velocity symbols relatively.
+
+Playback timing is derived from TIME_SIG, GRID and LENGTH.
 
 ---
 
-## 12. License
+# 11. Compatibility
 
-This specification is released under the same license as the Ardule project.
+This revision documents the existing ADT v2.2a implementation only.
+
+No syntax has been added, removed or modified.
+
+---
+
+# 12. License
+
+Released under the same license as the Ardule project.
