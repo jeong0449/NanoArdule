@@ -1,6 +1,10 @@
 # Ardule Project — Arduino Nano-based Drum Patternology Ecosystem
 
-
+> **🚧 Documentation Refresh in Progress (July 2026)**
+>
+> The Ardule ecosystem has recently undergone major architectural changes,
+> including the ADC Toolchain, [PatternLab](https://jeong0449.github.io/NanoArdule/), and an analysis-first workflow.
+> This README is being updated section by section to reflect the new architecture.
 
 **Ardule** is a complete open ecosystem for drum-pattern creation, conversion, playback, and analysis.  
 It integrates **Arduino-based real-time drum engines**, a Python-based pattern studio (APS), a curated pattern library,  
