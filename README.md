@@ -1,4 +1,4 @@
-# Ardule Project — Arduino Nano-based Drum Patternology Ecosystem
+# Nano Ardule Project — Arduino Nano-based Drum Patternology Ecosystem
 
 > **🚧 Documentation Refresh in Progress (July 2026)**
 >
